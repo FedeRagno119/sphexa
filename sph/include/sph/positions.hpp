@@ -101,11 +101,11 @@ template<class T>
 HOST_DEVICE_FUN auto positionUpdate(double dt, double dt_m1, cstone::Vec3<T> Xn, cstone::Vec3<T> An,
                                     cstone::Vec3<T> dXn, const cstone::Box<T>& box)
 {
-    auto Vnmhalf = dXn * (T(1) / dt_m1);
-    auto Vn      = Vnmhalf + T(0.5) * dt_m1 * An;
-    auto Vnp1    = Vn + An * dt;
-    auto dXnp1   = (Vn + T(0.5) * An * std::abs(dt)) * dt;
-    auto Xnp1    = cstone::putInBox(Xn + dXnp1, box);
+    auto Vnmhalf = dXn * (T(1) / dt_m1);                    //FR: Construct half-step velocity v_(n-1/2)
+    auto Vn      = Vnmhalf + T(0.5) * dt_m1 * An;           //FR: Construct full-step velocity v_n = v_(n-1/2) + 1/2 A_n dt_(n-1)
+    auto Vnp1    = Vn + An * dt;                            //FR: Construct velocity update    v_(n+1) = v_n + A_n*dt
+    auto dXnp1   = (Vn + T(0.5) * An * std::abs(dt)) * dt;  //FR: Velocity verlet drift step   dx_n+1 = v_n dt + 1/2 A_n dt^2
+    auto Xnp1    = cstone::putInBox(Xn + dXnp1, box);       //FR: Update position              x_n+1 = x_n + dx_n+1
 
     return util::tuple<cstone::Vec3<T>, cstone::Vec3<T>, cstone::Vec3<T>>{Xnp1, Vnp1, dXnp1};
 }
@@ -123,11 +123,14 @@ void updatePositionsHost(size_t startIndex, size_t endIndex, Dataset& d, const c
     {
         cstone::Vec3<T> X{d.x[i], d.y[i], d.z[i]};
 
+        //FR: checks whether a particle is near a fixed boudary and returns a modification factor if so 
         if (anyFBC) { adjustForFBC = fbcAdjustFactors(X, box, d.h[i]); }
         // To keep particles belonging to the fixed boundaries from moving, these two quantities need to be adjusted
         cstone::Vec3<T> A{d.ax[i] * adjustForFBC[0], d.ay[i] * adjustForFBC[1], d.az[i] * adjustForFBC[2]};
         cstone::Vec3<T> X_m1{d.x_m1[i] * adjustForFBC[0], d.y_m1[i] * adjustForFBC[1], d.z_m1[i] * adjustForFBC[2]};
         cstone::Vec3<T> V;
+        
+        //FR: Evaluate new positions, velocities, displacement
         util::tie(X, V, X_m1) = positionUpdate(d.minDt, d.minDt_m1, X, A, X_m1, box);
 
         util::tie(d.x[i], d.y[i], d.z[i])          = util::tie(X[0], X[1], X[2]);

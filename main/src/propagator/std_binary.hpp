@@ -79,7 +79,7 @@ public:
         star2.loadOrStoreAttributes(writer, "star2");
     }
 
-    //TO DO compute forces function
+    //TODO compute forces function
     void computeForces(DomainType& domain, DataType& simData) override
     {
         Base::computeForces(domain, simData);
@@ -97,8 +97,8 @@ public:
         disk::computeCentralForce(first, last, d, star2);
         timer.step("computeCentralForce");
 
-        // TODO: STAR <-> STAR FORCE - to implement in code/sphexa/physics/Disk/include/reciprocal_force.hpp
-        disk::computeBinaryForce(star1, star2, d);               //FR: computes the forces between the stars
+        // TODO (not stringent): einstein precession
+        disk::computeBinaryForce(star1, star2, d);  // computes the forces between the stars
         timer.step("computeBinaryForce");
     }
 
@@ -156,6 +156,6 @@ public:
 
     }
 
-}
+};
 
-}
+} // namespace sphexa

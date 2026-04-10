@@ -23,7 +23,7 @@ struct StarData
     //! @brief position of the central star
     cstone::Vec3<double> position{};
 
-    //! @brief position of the central star in the last step
+    //! @brief displacement of the central star in the last step
     cstone::Vec3<double> position_m1{};
 
     //! @brief mass of the central star

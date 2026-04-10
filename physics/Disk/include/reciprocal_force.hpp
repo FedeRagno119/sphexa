@@ -65,7 +65,8 @@ namespace disk
         }
         else if (star1.potentialType == StarPotentialType::einstein_precession)
         {
-            //einsteinianBinaryForce();
+            //einsteinianBinaryForce(star1, star2, force_binary_1, force_binary_2, t_binary, d);
+            assert(false && "einsteinian physics not yet developed");
         }
 
         star1.force_binary = force_binary_1;

@@ -67,6 +67,7 @@ int  getNumLocalRanks(int);
 
 int main(int argc, char** argv)
 {
+    // 1. Parse user inputs from command line
     auto [rank, numRanks] = initMpi();
     const ArgParser parser(argc, (const char**)argv);
 
@@ -118,7 +119,10 @@ int main(int argc, char** argv)
 
     propagator->addCounters(pmroot, getNumLocalRanks(numRanks));
     propagator->activateFields(simData);
-    propagator->load(initCond, fileReader.get());
+
+    try { propagator->load(initCond, fileReader.get()); }
+    catch( const std::exception& e ) { std::cerr << e.what() << std::endl; }
+
     auto box = simInit->init(rank, numRanks, problemSize, simData, fileReader.get());
 
     auto& d = simData.hydro;
@@ -147,9 +151,10 @@ int main(int argc, char** argv)
     size_t startIteration    = d.iteration;
     bool   isOutputTriggered = false;
 
+    // 2. main loop of the simulation
     for (bool keepRunning = true; keepRunning; d.iteration++)
     {
-        propagator->computeForces(domain, simData);
+        propagator->computeForces(domain, simData);     //FR: force computation
         box = domain.box();
 
         if (propagator->isSynced())
@@ -180,7 +185,7 @@ int main(int argc, char** argv)
 
         viz::execute(d, domain.startIndex(), domain.endIndex());
 
-        propagator->integrate(domain, simData);
+        propagator->integrate(domain, simData);         //FR: particle integration
         propagator->printIterationTimings(domain, simData);
 
         if (isOutputStep(d.iteration, profFreqStr) || isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) ||

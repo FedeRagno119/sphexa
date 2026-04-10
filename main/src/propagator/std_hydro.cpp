@@ -36,6 +36,7 @@
 
 #ifdef SPH_EXA_HAVE_DISKS
 #include "std_disk.hpp"
+#include "std_binary.hpp"
 #endif
 
 namespace sphexa
@@ -55,6 +56,14 @@ PropLib<DomainType, ParticleDataType>::makeDiskProp(std::ostream& output, size_t
 {
     return std::make_unique<DiskProp<DomainType, ParticleDataType>>(output, rank, settings);
 }
+
+template<class DomainType, class ParticleDataType>
+std::unique_ptr<Propagator<DomainType, ParticleDataType>>
+PropLib<DomainType, ParticleDataType>::makeBinaryProp(std::ostream& output, size_t rank, const InitSettings& settings)
+{
+    return std::make_unique<BinaryProp<DomainType, ParticleDataType>>(output, rank, settings);
+}
+
 #endif
 
 #ifdef USE_CUDA

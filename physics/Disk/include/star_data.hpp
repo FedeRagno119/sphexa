@@ -50,9 +50,21 @@ struct StarData
     //! @brief Limit the timestep depending on changes in the internal energy. delta_t = K_u * u / du
     double K_u{std::numeric_limits<double>::infinity()};
 
+    /*FR:
+    Reads or writes star attributes depending on what Archive object is passed. 
+        - Used during initialization to define star object (called in propagator->load() )
+        - Used during particle dumps to write to file (called in propagator->save() )
+    NOTE: this does not initialize the star's initial position!
+    */
     template<typename Archive>
-    void loadOrStoreAttributes(Archive* ar)
+    void loadOrStoreAttributes(Archive* ar, const std::string& prefix = "star")
     {
+        /*FR
+        Loads or stores an attribute of the star:
+            - attribute: name of the attribute to load/store (in the Archive)
+            - location: memory location of the attribute to store (in the star)
+            - attrSize: size of the attribute
+        */
         //! @brief load or store an attribute, skips non-existing attributes on load.
         auto optionalIO = [ar](const std::string& attribute, auto* location, size_t attrSize)
         {
@@ -79,28 +91,31 @@ struct StarData
             }
         };
 
-        optionalIO("star::potentialType", &potentialType, 1);
-        optionalIO("star::x", &position[0], 1);
-        optionalIO("star::y", &position[1], 1);
-        optionalIO("star::z", &position[2], 1);
-        optionalIO("star::x_m1", &position_m1[0], 1);
-        optionalIO("star::y_m1", &position_m1[1], 1);
-        optionalIO("star::z_m1", &position_m1[2], 1);
-        optionalIO("star::m", &m, 1);
-        optionalIO("star::inner_size", &inner_size, 1);
-        optionalIO("star::fixed_star", &fixed_star, 1);
-        optionalIO("star::beta", &beta, 1);
-        optionalIO("star::removal_limit_h", &removal_limit_h, 1);
-        optionalIO("star::cooling_rho_limit", &cooling_rho_limit, 1);
-        optionalIO("star::u_floor", &u_floor, 1);
-        optionalIO("star::K_u", &K_u, 1);
+        optionalIO(prefix + "::potentialType", &potentialType, 1);
+        optionalIO(prefix + "::x", &position[0], 1);
+        optionalIO(prefix + "::y", &position[1], 1);
+        optionalIO(prefix + "::z", &position[2], 1);
+        optionalIO(prefix + "::x_m1", &position_m1[0], 1);
+        optionalIO(prefix + "::y_m1", &position_m1[1], 1);
+        optionalIO(prefix + "::z_m1", &position_m1[2], 1);
+        optionalIO(prefix + "::m", &m, 1);
+        optionalIO(prefix + "::inner_size", &inner_size, 1);
+        optionalIO(prefix + "::fixed_star", &fixed_star, 1);
+        optionalIO(prefix + "::beta", &beta, 1);
+        optionalIO(prefix + "::removal_limit_h", &removal_limit_h, 1);
+        optionalIO(prefix + "::cooling_rho_limit", &cooling_rho_limit, 1);
+        optionalIO(prefix + "::u_floor", &u_floor, 1);
+        optionalIO(prefix + "::K_u", &K_u, 1);
     };
 
     //! @brief Potential from interaction between star and particles
     double potential{};
 
+    //! @brief Potential [0] and force [1..3] acting on the star due to other star(s)
+    cstone::Vec4<double> force_binary{0, 0, 0, 0};
+
     //! @brief Values local to each rank
-    //! @brief Total potential [0] and force [1..3] acting on the star (local to rank)
+    //! @brief Potential [0] and force [1..3] acting on the star due to particles (local to rank)
     cstone::Vec4<double> force_local{};
 
     //! @brief Statistics of accreted particles
@@ -111,6 +126,9 @@ struct StarData
 
     //! @brief timestep from central acceleration (local to rank)
     double t_star{};
+
+    //! @brief timestep from binary acceleration
+    double t_binary{0};
 
     //! @brief du-timestep (local to rank)
     double t_du{};

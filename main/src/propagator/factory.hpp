@@ -66,6 +66,7 @@ propagatorFactory(const std::string& choice, bool avClean, std::ostream& output,
     }
 #ifdef SPH_EXA_HAVE_DISKS
     if (choice == "std-disk") { return PropLib<DomainType, ParticleDataType>::makeDiskProp(output, rank, s); }
+    if (choice == "std-binary") { return PropLib<DomainType, ParticleDataType>::makeBinaryProp(output, rank, s); }
 #endif
 
     throw std::runtime_error("Unknown propagator choice: " + choice);

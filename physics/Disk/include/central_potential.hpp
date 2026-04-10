@@ -42,6 +42,7 @@ HOST_DEVICE_FUN void newtonianGravity(const Data& d, size_t i, cstone::Vec4<doub
     const double dist  = std::sqrt(dist2);
     const double dist3 = dist2 * dist;
 
+    //FR: single contribution to acceleration on particle
     const double a_strength = 1. / dist3 * d.m_star * d.g;
     const double ax_i       = -dx * a_strength;
     const double ay_i       = -dy * a_strength;
@@ -56,7 +57,7 @@ HOST_DEVICE_FUN void newtonianGravity(const Data& d, size_t i, cstone::Vec4<doub
     star_force_local[3] -= az_i * d.m[i];
 
     const double a_abs = std::sqrt(ax_i * ax_i + ay_i * ay_i + az_i * az_i);
-    t_star             = stl::min(t_star, float(std::sqrt(dist / a_abs)));
+    t_star             = stl::min(t_star, float(std::sqrt(dist / a_abs))); //FR: update shortest keplerian orbit timescale
 }
 
 template<typename Data>

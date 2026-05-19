@@ -204,6 +204,9 @@ double duTimestepPercentileGPU(size_t first, size_t last, const Treal* u, const 
 
 DU_TIMESTEP_PERCENTILE_GPU(double);
 
+// Persistent device counter — same pattern as force_device in central_force_gpu.cu.
+static __device__ unsigned long long count_device;
+
 template<typename Treal>
 __global__ void applyEnergyFloorKernel(size_t first, size_t last, Treal* u, Treal u_min,
                                        unsigned long long* count)
@@ -222,20 +225,22 @@ size_t applyEnergyFloorGPU(size_t first, size_t last, Treal* u, double u_inf)
 {
     const Treal u_min = Treal(u_inf) / Treal(10);
 
-    unsigned long long* d_count;
-    cudaMalloc(&d_count, sizeof(unsigned long long));
-    cudaMemset(d_count, 0, sizeof(unsigned long long));
+    const unsigned long long zero = 0;
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(count_device), &zero, sizeof(zero)));
+
+    unsigned long long* count_ptr;
+    checkGpuErrors(cudaGetSymbolAddress((void**)&count_ptr, GPU_SYMBOL(count_device)));
 
     cstone::LocalIndex numParticles = last - first;
     unsigned           numThreads   = 256;
     unsigned           numBlocks    = (numParticles + numThreads - 1) / numThreads;
 
-    applyEnergyFloorKernel<<<numBlocks, numThreads>>>(first, last, u, u_min, d_count);
+    applyEnergyFloorKernel<<<numBlocks, numThreads>>>(first, last, u, u_min, count_ptr);
     checkGpuErrors(cudaDeviceSynchronize());
+    checkGpuErrors(cudaGetLastError());
 
-    unsigned long long h_count = 0;
-    cudaMemcpy(&h_count, d_count, sizeof(unsigned long long), cudaMemcpyDeviceToHost);
-    cudaFree(d_count);
+    unsigned long long h_count;
+    checkGpuErrors(cudaMemcpyFromSymbol(&h_count, GPU_SYMBOL(count_device), sizeof(h_count)));
 
     return size_t(h_count);
 }

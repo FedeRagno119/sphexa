@@ -139,6 +139,17 @@ __global__ void computeBinaryAccretionConditionKernel(
     }
 }
 
+// Persistent device accumulators — zeroed before each kernel, read back after.
+// Avoids per-call cudaMalloc/cudaFree (each costs 50–200 µs device-wide lock).
+// Pattern matches central_force_gpu.cu (force_device, t_star_device).
+static __device__ RemovalStatistics accreted_device_ss;
+static __device__ RemovalStatistics removed_device_ss;
+
+static __device__ RemovalStatistics accreted_device_bin_1;
+static __device__ RemovalStatistics removed_device_bin_1;
+static __device__ RemovalStatistics accreted_device_bin_2;
+static __device__ RemovalStatistics removed_device_bin_2;
+
 template<typename Treal, typename Thydro, typename Tkeys, typename Tmass>
 void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z,
                                   const Thydro* h, Tkeys* keys, const Tmass* m, const Thydro* vx, const Thydro* vy,
@@ -148,29 +159,24 @@ void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, con
     constexpr unsigned numThreads   = 256;
     unsigned           numBlocks    = (numParticles + numThreads - 1) / numThreads;
 
-    star.accreted_local = {};
-    star.removed_local  = {};
+    const RemovalStatistics zero{};
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(accreted_device_ss), &zero, sizeof(zero)));
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(removed_device_ss),  &zero, sizeof(zero)));
 
-    RemovalStatistics *accreted_device, *removed_device;
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&accreted_device), sizeof *accreted_device));
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&removed_device), sizeof *removed_device));
-    checkGpuErrors(
-        cudaMemcpy(accreted_device, &star.accreted_local, sizeof star.accreted_local, cudaMemcpyHostToDevice));
-    checkGpuErrors(cudaMemcpy(removed_device, &star.removed_local, sizeof star.removed_local, cudaMemcpyHostToDevice));
+    RemovalStatistics *accreted_ptr, *removed_ptr;
+    checkGpuErrors(cudaGetSymbolAddress((void**)&accreted_ptr, GPU_SYMBOL(accreted_device_ss)));
+    checkGpuErrors(cudaGetSymbolAddress((void**)&removed_ptr,  GPU_SYMBOL(removed_device_ss)));
 
     computeAccretionConditionKernel<numThreads><<<numBlocks, numThreads>>>(
         first, last, x, y, z, h, keys, m, vx, vy, vz, star.position, star.inner_size * star.inner_size,
         star.removal_limit_h, star.removal_limit_r * star.removal_limit_r, star.removal_limit_z,
-        accreted_device, removed_device);
+        accreted_ptr, removed_ptr);
 
     checkGpuErrors(cudaDeviceSynchronize());
     checkGpuErrors(cudaGetLastError());
 
-    checkGpuErrors(
-        cudaMemcpy(&star.accreted_local, accreted_device, sizeof star.accreted_local, cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaMemcpy(&star.removed_local, removed_device, sizeof star.removed_local, cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaFree(accreted_device));
-    checkGpuErrors(cudaFree(removed_device));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star.accreted_local, GPU_SYMBOL(accreted_device_ss), sizeof(star.accreted_local)));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star.removed_local,  GPU_SYMBOL(removed_device_ss),  sizeof(star.removed_local)));
 }
 
 template<typename Treal, typename Thydro, typename Tkeys, typename Tmass>
@@ -183,20 +189,17 @@ void computeBinaryAccretionConditionGPU(size_t first, size_t last,
     constexpr unsigned numThreads   = 256;
     unsigned           numBlocks    = (numParticles + numThreads - 1) / numThreads;
 
-    star1.accreted_local = {};
-    star1.removed_local  = {};
-    star2.accreted_local = {};
-    star2.removed_local  = {};
+    const RemovalStatistics zero{};
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(accreted_device_bin_1), &zero, sizeof(zero)));
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(removed_device_bin_1),  &zero, sizeof(zero)));
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(accreted_device_bin_2), &zero, sizeof(zero)));
+    checkGpuErrors(cudaMemcpyToSymbol(GPU_SYMBOL(removed_device_bin_2),  &zero, sizeof(zero)));
 
     RemovalStatistics *accreted1_d, *removed1_d, *accreted2_d, *removed2_d;
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&accreted1_d), sizeof(RemovalStatistics)));
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&removed1_d),  sizeof(RemovalStatistics)));
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&accreted2_d), sizeof(RemovalStatistics)));
-    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&removed2_d),  sizeof(RemovalStatistics)));
-    checkGpuErrors(cudaMemcpy(accreted1_d, &star1.accreted_local, sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
-    checkGpuErrors(cudaMemcpy(removed1_d,  &star1.removed_local,  sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
-    checkGpuErrors(cudaMemcpy(accreted2_d, &star2.accreted_local, sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
-    checkGpuErrors(cudaMemcpy(removed2_d,  &star2.removed_local,  sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
+    checkGpuErrors(cudaGetSymbolAddress((void**)&accreted1_d, GPU_SYMBOL(accreted_device_bin_1)));
+    checkGpuErrors(cudaGetSymbolAddress((void**)&removed1_d,  GPU_SYMBOL(removed_device_bin_1)));
+    checkGpuErrors(cudaGetSymbolAddress((void**)&accreted2_d, GPU_SYMBOL(accreted_device_bin_2)));
+    checkGpuErrors(cudaGetSymbolAddress((void**)&removed2_d,  GPU_SYMBOL(removed_device_bin_2)));
 
     computeBinaryAccretionConditionKernel<numThreads><<<numBlocks, numThreads>>>(
         first, last, x, y, z, h, keys, m, vx, vy, vz,
@@ -209,14 +212,10 @@ void computeBinaryAccretionConditionGPU(size_t first, size_t last,
     checkGpuErrors(cudaDeviceSynchronize());
     checkGpuErrors(cudaGetLastError());
 
-    checkGpuErrors(cudaMemcpy(&star1.accreted_local, accreted1_d, sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaMemcpy(&star1.removed_local,  removed1_d,  sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaMemcpy(&star2.accreted_local, accreted2_d, sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaMemcpy(&star2.removed_local,  removed2_d,  sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
-    checkGpuErrors(cudaFree(accreted1_d));
-    checkGpuErrors(cudaFree(removed1_d));
-    checkGpuErrors(cudaFree(accreted2_d));
-    checkGpuErrors(cudaFree(removed2_d));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star1.accreted_local, GPU_SYMBOL(accreted_device_bin_1), sizeof(star1.accreted_local)));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star1.removed_local,  GPU_SYMBOL(removed_device_bin_1),  sizeof(star1.removed_local)));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star2.accreted_local, GPU_SYMBOL(accreted_device_bin_2), sizeof(star2.accreted_local)));
+    checkGpuErrors(cudaMemcpyFromSymbol(&star2.removed_local,  GPU_SYMBOL(removed_device_bin_2),  sizeof(star2.removed_local)));
 }
 
 #define COMPUTE_ACCRETION_CONDITION_GPU(Treal, Thydro, Tkeys, Tmass)                                                   \

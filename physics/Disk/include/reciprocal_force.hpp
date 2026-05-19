@@ -16,7 +16,7 @@
 namespace disk 
 {
     template <typename Dataset, typename StarData>
-    void newtonianBinaryForce(const StarData& star1, const StarData& star2, cstone::Vec4<double>& force_binary_1, cstone::Vec4<double>& force_binary_2, float& t_binary, Dataset& d) 
+    void newtonianBinaryForce(StarData& star1, StarData& star2, Dataset& d)
     {
         const double dx = star2.position[0] - star1.position[0];
         const double dy = star2.position[1] - star1.position[1];
@@ -28,18 +28,21 @@ namespace disk
 
         const double f_strength = (1. / dist3) * star1.m * star2.m * d.g;
 
-        force_binary_1[0] = - (d.g * star2.m * star1.m) / dist;
-        force_binary_1[1] = f_strength * dx;
-        force_binary_1[2] = f_strength * dy;
-        force_binary_1[3] = f_strength * dz;
-        
-        force_binary_2[0] = force_binary_1[0];
-        force_binary_2[1] = - force_binary_1[1];
-        force_binary_2[2] = - force_binary_1[2];
-        force_binary_2[3] = - force_binary_1[3];
+        star1.force_binary[0] = - (d.g * star2.m) / dist;
+        star1.force_binary[1] = f_strength * dx;
+        star1.force_binary[2] = f_strength * dy;
+        star1.force_binary[3] = f_strength * dz;
+
+        star2.force_binary[0] = - (d.g * star1.m) / dist;
+        star2.force_binary[1] = - star1.force_binary[1];
+        star2.force_binary[2] = - star1.force_binary[2];
+        star2.force_binary[3] = - star1.force_binary[3];
 
         const double t_binary_sq = (4 * CONST_PI * CONST_PI * dist3) / (d.g * (star1.m + star2.m));
-        t_binary = std::sqrt(t_binary_sq);
+        const double t_binary = std::sqrt(t_binary_sq);
+
+        star1.t_binary = t_binary;
+        star2.t_binary = t_binary;
     }
 
     template <typename Dataset, typename StarData>
@@ -52,28 +55,17 @@ namespace disk
             3) (MAYBE) must store minimum timestep due to binary orbitals
         */
 
-        cstone::Vec4<double> force_binary_1{};
-        cstone::Vec4<double> force_binary_2{};
-
-        float t_binary{std::numeric_limits<float>::infinity()};
-        
         assert(binary_is_consistent(star1, star2) && "Assertion error in computing binary forces: stars are not consistent");
 
         if (star1.potentialType == StarPotentialType::newtonian) 
         { 
-            newtonianBinaryForce(star1, star2, force_binary_1, force_binary_2, t_binary, d); 
+            newtonianBinaryForce(star1, star2, d); 
         }
         else if (star1.potentialType == StarPotentialType::einstein_precession)
         {
-            //einsteinianBinaryForce(star1, star2, force_binary_1, force_binary_2, t_binary, d);
+            //TODO einsteinianBinaryForce(star1, star2, d);
             assert(false && "einsteinian physics not yet developed");
         }
-
-        star1.force_binary = force_binary_1;
-        star2.force_binary = force_binary_2;    
-
-        star1.t_binary = t_binary;
-        star2.t_binary = t_binary;
     }
 
 } // namespace disk

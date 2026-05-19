@@ -27,7 +27,7 @@ struct CentralPotentialData
     Thydro *             ax, *ay, *az;
     Treal                g;
     const double         m_star;
-    const double         inner_size2;
+    const double         grav_softening2;
     const double         c_light;
     cstone::Vec3<double> star_position;
 };
@@ -38,7 +38,7 @@ HOST_DEVICE_FUN void newtonianGravity(const Data& d, size_t i, cstone::Vec4<doub
     const double dx    = d.x[i] - d.star_position[0];
     const double dy    = d.y[i] - d.star_position[1];
     const double dz    = d.z[i] - d.star_position[2];
-    const double dist2 = stl::max(d.inner_size2, dx * dx + dy * dy + dz * dz);
+    const double dist2 = dx * dx + dy * dy + dz * dz + d.grav_softening2; //FR: CHANGED from stl::max(d.grav_softening2, dx * dx + dy * dy + dz * dz);
     const double dist  = std::sqrt(dist2);
     const double dist3 = dist2 * dist;
 
@@ -66,7 +66,7 @@ HOST_DEVICE_FUN void einsteinPrecession(const Data& d, size_t i, cstone::Vec4<do
     const double dx    = d.x[i] - d.star_position[0];
     const double dy    = d.y[i] - d.star_position[1];
     const double dz    = d.z[i] - d.star_position[2];
-    const double dist2 = stl::max(d.inner_size2, dx * dx + dy * dy + dz * dz);
+    const double dist2 = dx * dx + dy * dy + dz * dz + d.grav_softening2; //FR changed from stl::max(d.grav_softening2, dx * dx + dy * dy + dz * dz);
     const double dist  = std::sqrt(dist2);
     const double dist3 = dist2 * dist;
 

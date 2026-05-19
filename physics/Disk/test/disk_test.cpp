@@ -71,9 +71,9 @@ TEST(CentralPotentials, testNewtonian)
         .az            = az,
         .g             = 1.0,
         .m_star        = 1.0,
-        .inner_size2   = 0.,
-        .c_light       = 1.,
-        .star_position = {0., 0., 0.},
+        .grav_softening2 = 0.,
+        .c_light         = 1.,
+        .star_position   = {0., 0., 0.},
     };
 
     cstone::Vec4<double> star_force{};
@@ -118,11 +118,11 @@ TEST(CentralPotentials, testEinsteinPrecession)
         .ax            = ax.data(),
         .ay            = ay.data(),
         .az            = az.data(),
-        .g             = 1.0,
-        .m_star        = 1.0,
-        .inner_size2   = 0.,
-        .c_light       = 1.,
-        .star_position = {0., 0., 0.},
+        .g               = 1.0,
+        .m_star          = 1.0,
+        .grav_softening2 = 0.,
+        .c_light         = 1.,
+        .star_position   = {0., 0., 0.},
     };
     disk::CentralPotentialData d_newton{
         .x             = x.data(),
@@ -132,11 +132,11 @@ TEST(CentralPotentials, testEinsteinPrecession)
         .ax            = ax_newton.data(),
         .ay            = ay_newton.data(),
         .az            = az_newton.data(),
-        .g             = 1.0,
-        .m_star        = 1.0,
-        .inner_size2   = 0.,
-        .c_light       = 1.,
-        .star_position = {0., 0., 0.},
+        .g               = 1.0,
+        .m_star          = 1.0,
+        .grav_softening2 = 0.,
+        .c_light         = 1.,
+        .star_position   = {0., 0., 0.},
     };
 
     cstone::Vec4<double> star_force{};

@@ -90,7 +90,7 @@ public:
     //! @brief whether to remove unconverged particles when the smoothing length update failed
     int removeUnconvergedParticles{false};
 
-    RealType ttot{0.0}, etot{0.0}, ecin{0.0}, eint{0.0}, egrav{0.0};
+    RealType ttot{0.0}, etot{0.0}, ecin{0.0}, eint{0.0}, egrav{0.0};      //FR: total energy; kinetic energy; internal energy; potential energy
     RealType linmom{0.0}, angmom{0.0};
 
     //! current and previous (global) time-steps
@@ -109,6 +109,11 @@ public:
     RealType eps{0.005};
     //! @brief acceleration based time-step control
     RealType etaAcc{0.2};
+    //! @brief energy floor for the duTimestep limiter: particles with u < u_inf are excluded from min(|u/du|)
+    RealType u_inf{0.0};
+    //! @brief fraction of particles that must satisfy the energy-change criterion per step.
+    //! 1.0 = global minimum (current behaviour); < 1.0 activates percentile-based selection.
+    RealType duLimitPercentile{1.0};
 
     //! @brief EOS parameters
     sph::EosType eosChoice{sph::EosType::idealGas};
@@ -185,6 +190,8 @@ public:
         ar->stepAttribute("gravConstant", &g, 1);
         optionalIO("eps", &eps, 1);
         optionalIO("etaAcc", &etaAcc, 1);
+        optionalIO("u_inf", &u_inf, 1);
+        optionalIO("duLimitPercentile", &duLimitPercentile, 1);
 
         // EOS parameters
         optionalIO("gamma", &gamma, 1);

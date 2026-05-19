@@ -99,7 +99,7 @@ public:
     //! @brief Returns time elapsed since the start of last call to computeForces()
     float stepElapsed() const { return timer.sumOfSteps(); }
 
-    void printIterationTimings(const DomainType& domain, const ParticleDataType& simData)
+    virtual void printIterationTimings(const DomainType& domain, const ParticleDataType& simData)
     {
         if (rank_ > 0) { return; } // global particle and nc counts are only valid on rank 0
         const auto& d   = simData.hydro;
@@ -124,7 +124,7 @@ public:
         out << "### Check ### Total Neighbors: " << totalNeighbors
             << ", Avg neighbor count per particle: " << avgNcPerParticle << std::endl;
         out << "### Check ### Total time: " << d.ttot - d.minDt << ", current time-step: " << d.minDt << std::endl;
-        out << "### Check ### Total energy: " << d.etot << ", (internal: " << d.eint << ", kinetic: " << d.ecin;
+        out << "### Check ### Total particle energy: " << d.etot << ", (internal: " << d.eint << ", kinetic: " << d.ecin;
         out << ", gravitational: " << d.egrav;
         out << ")" << std::endl;
         out << "### Check ### Focus Tree Nodes: " << domain.focusTree().octreeViewAcc().numLeafNodes << ", maxDepth "

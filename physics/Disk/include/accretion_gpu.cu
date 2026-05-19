@@ -38,7 +38,8 @@ template<unsigned numThreads, typename T1, typename Th, typename Tkeys, typename
 __global__ void computeAccretionConditionKernel(size_t first, size_t last, const T1* x, const T1* y, const T1* z,
                                                 const Th* h, Tkeys* keys, const Tm* m, const Tv* vx, const Tv* vy,
                                                 const Tv* vz, const cstone::Vec3<T2> star_position, T2 star_size2,
-                                                T2 removal_limit_h, RemovalStatistics* device_accreted,
+                                                T2 removal_limit_h, T2 removal_limit_r2, T2 removal_limit_z,
+                                                RemovalStatistics* device_accreted,
                                                 RemovalStatistics* device_removed)
 {
     cstone::LocalIndex i = first + blockDim.x * blockIdx.x + threadIdx.x;
@@ -56,8 +57,13 @@ __global__ void computeAccretionConditionKernel(size_t first, size_t last, const
         const double dz    = z[i] - star_position[2];
         const double dist2 = dx * dx + dy * dy + dz * dz;
 
+        const double r_cyl2 = (double)x[i] * x[i] + (double)y[i] * y[i];
+        const double abs_z  = fabs((double)z[i]);
+
         if (dist2 < star_size2) { markForRemovalAndAdd(accreted, i, keys, m, vx, vy, vz); }
-        else if (h[i] > removal_limit_h) { markForRemovalAndAdd(removed, i, keys, m, vx, vy, vz); }
+        else if (h[i] > removal_limit_h
+                 || r_cyl2 > removal_limit_r2
+                 || abs_z  > removal_limit_z) { markForRemovalAndAdd(removed, i, keys, m, vx, vy, vz); }
     }
 
     typedef cub::BlockReduce<RemovalStatistics, numThreads> BlockReduce;
@@ -93,7 +99,8 @@ void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, con
 
     computeAccretionConditionKernel<numThreads><<<numBlocks, numThreads>>>(
         first, last, x, y, z, h, keys, m, vx, vy, vz, star.position, star.inner_size * star.inner_size,
-        star.removal_limit_h, accreted_device, removed_device);
+        star.removal_limit_h, star.removal_limit_r * star.removal_limit_r, star.removal_limit_z,
+        accreted_device, removed_device);
 
     checkGpuErrors(cudaDeviceSynchronize());
     checkGpuErrors(cudaGetLastError());

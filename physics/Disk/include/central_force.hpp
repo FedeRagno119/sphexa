@@ -29,20 +29,20 @@ void computeCentralForceImpl(size_t first, size_t last, Dataset& d, StarData& st
     cstone::Vec4<double>       force_local{};
     
     float                      t_star{std::numeric_limits<float>::infinity()};  //FR: stores minimum timestep constraint from central gravity
-    const double               inner_size2 = star.inner_size * star.inner_size; //FR: gravitational softening radius limit (physically interpreted as size of star) - code uses max(r^2, r_inner^2)
-    
+    const double               grav_softening2 = star.grav_softening * star.grav_softening;
+
     /*FR:
     Structure containing vectors of pointers to the data needed for the force evaluation, includes:
-        particle positions, 
-        particle masses, 
-        particle accelerations, 
-        gravitational constant, 
-        star mass, 
-        softening radius, 
+        particle positions,
+        particle masses,
+        particle accelerations,
+        gravitational constant,
+        star mass,
+        softening radius,
         star position
     */
     const CentralPotentialData data{d.x.data(),  d.y.data(), d.z.data(), d.m.data(),  d.ax.data(), d.ay.data(),
-                                    d.az.data(), d.g,        star.m,     inner_size2, 1.0,         star.position};
+                                    d.az.data(), d.g,        star.m,     grav_softening2, 1.0,      star.position};
 
 #pragma omp declare reduction(add_force : cstone::Vec4<double> : omp_out = omp_out + omp_in) initializer(omp_priv = {})
 

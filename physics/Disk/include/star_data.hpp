@@ -32,6 +32,9 @@ struct StarData
     //! @brief inner size of the central star where particles are accreted
     double inner_size{0.};
 
+    //! @brief Gravitational softening length for star-particle interactions.
+    double grav_softening{0.};
+
     //! @brief Fix the position of the central star instead of integrating the position
     int fixed_star{1};
 
@@ -41,6 +44,12 @@ struct StarData
     //! @brief Remove all particles with a smoothing length greater than this value
     double removal_limit_h{std::numeric_limits<double>::infinity()};
 
+    //! @brief Remove all particles beyond this cylindrical radius (sqrt(x²+y²) > removal_limit_r)
+    double removal_limit_r{std::numeric_limits<double>::infinity()};
+
+    //! @brief Remove all particles beyond this vertical height (|z| > removal_limit_z)
+    double removal_limit_z{std::numeric_limits<double>::infinity()};
+
     //! @brief Don't cool any particle above this density threshold
     double cooling_rho_limit{std::numeric_limits<float>::infinity()};
 
@@ -49,6 +58,9 @@ struct StarData
 
     //! @brief Limit the timestep depending on changes in the internal energy. delta_t = K_u * u / du
     double K_u{std::numeric_limits<double>::infinity()};
+
+    //! @brief Softening length for beta cooling to prevent du divergence near the center of mass
+    double betaEps{0.1};
 
     /*FR:
     Reads or writes star attributes depending on what Archive object is passed. 
@@ -100,22 +112,32 @@ struct StarData
         optionalIO(prefix + "::z_m1", &position_m1[2], 1);
         optionalIO(prefix + "::m", &m, 1);
         optionalIO(prefix + "::inner_size", &inner_size, 1);
+        optionalIO(prefix + "::grav_softening", &grav_softening, 1);
         optionalIO(prefix + "::fixed_star", &fixed_star, 1);
         optionalIO(prefix + "::beta", &beta, 1);
         optionalIO(prefix + "::removal_limit_h", &removal_limit_h, 1);
+        optionalIO(prefix + "::removal_limit_r", &removal_limit_r, 1);
+        optionalIO(prefix + "::removal_limit_z", &removal_limit_z, 1);
         optionalIO(prefix + "::cooling_rho_limit", &cooling_rho_limit, 1);
         optionalIO(prefix + "::u_floor", &u_floor, 1);
         optionalIO(prefix + "::K_u", &K_u, 1);
+        optionalIO(prefix + "::betaEps", &betaEps, 1);
     };
 
-    //! @brief Potential from interaction between star and particles
+    //! @brief Specific potential at star location due to disk particles: ∑_i (-G m_i / r_i).
+    //!        Units are [L²/T²] (energy per unit mass). Disk-star interaction energy = star.m * star.potential.
     double potential{};
 
-    //! @brief Potential [0] and force [1..3] acting on the star due to other star(s)
+    double ecin{0.};   //! @brief kinetic energy of the star
+    double egrav{0.};  //! @brief gravitational PE: star.m * star.potential + 0.5 * star-star PE
+    double etot{0.};   //! @brief total mechanical energy = ecin + egrav
+
+    //! @brief Specific binary potential [0] (= -G*M_other/r, units [L^2/T^2]) and
+    //!        total binary force [1..3] ([Force]) acting on the star due to the other star.
     cstone::Vec4<double> force_binary{0, 0, 0, 0};
 
     //! @brief Values local to each rank
-    //! @brief Potential [0] and force [1..3] acting on the star due to particles (local to rank)
+    //! @brief Specific potential [0] and force [1..3] acting on the star due to particles (local to rank)
     cstone::Vec4<double> force_local{};
 
     //! @brief Statistics of accreted particles

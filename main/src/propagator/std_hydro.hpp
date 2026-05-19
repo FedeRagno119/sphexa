@@ -116,12 +116,21 @@ public:
         d.treeView = domain.octreeProperties();
     }
 
+    template<class Vector>  //ADDED
+    void zeroKeys(Vector& keys)
+    {
+        using T = std::decay_t<Vector>::value_type;
+        cstone::fill<IsDeviceVector<Vector>{}>(keys.begin(), keys.end(), T(0));
+    }
+
     void computeForces(DomainType& domain, DataType& simData) override
     {
         timer.start();
         pmReader.start();
 
-        sync(domain, simData);
+        sync(domain, simData);          //FR Domain synchronization
+        zeroKeys(simData.hydro.keys);   //FR ADDED (solves particle removal bug)
+        
         timer.step("domain::sync");
         Base::logDomainStats(domain, simData);
 
@@ -132,25 +141,25 @@ public:
         size_t last  = domain.endIndex();
 
         domain.exchangeHalos(std::tie(get<"m">(d)), get<"ax">(d), get<"ay">(d));
-        findNeighborsSfc(first, last, d, domain.box());
+        findNeighborsSfc(first, last, d, domain.box());         //FR neighbor search algorithm
         computeGroups(first, last, d, domain.box(), groups_);
         timer.step("FindNeighbors");
 
-        computeDensity(groups_.view(), d, domain.box());
+        computeDensity(groups_.view(), d, domain.box());        //FR density calculation
         timer.step("Density");
-        computeEOS_HydroStd(first, last, d);
+        computeEOS_HydroStd(first, last, d);                    //FR equation of state
         timer.step("EquationOfState");
 
         domain.exchangeHalos(get<"vx", "vy", "vz", "rho", "p", "c">(d), get<"ax">(d), get<"ay">(d));
         timer.step("mpi::synchronizeHalos");
 
-        computeIAD(groups_.view(), d, domain.box());
+        computeIAD(groups_.view(), d, domain.box());            //FR IAD calculation
         timer.step("IAD");
 
         domain.exchangeHalos(get<"c11", "c12", "c13", "c22", "c23", "c33">(d), get<"ax">(d), get<"ay">(d));
         timer.step("mpi::synchronizeHalos");
 
-        computeMomentumEnergySTD(groups_.view(), d, domain.box());
+        computeMomentumEnergySTD(groups_.view(), d, domain.box());  //FR SPH forces
         timer.step("MomentumEnergyIAD");
 
         if (d.g != 0.0)
@@ -173,13 +182,13 @@ public:
         size_t first = domain.startIndex();
         size_t last  = domain.endIndex();
 
-        computeTimestep(first, last, d);
+        computeTimestep(first, last, d);        //FR adaptive dt
         timer.step("Timestep");
-        computePositions(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)});
+        computePositions(groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)});    //FR energy update
         bool haveUnconvergedParticles = updateSmoothingLength(groups_.view(), d);
         if (haveUnconvergedParticles && not d.removeUnconvergedParticles)
         {
-            throw std::runtime_error("Neighbor search did not converge\n");
+            throw std::runtime_error("Neighbor search did not converge\n"); //FR crash the simulation if you have unconverged particles and removeUnconvergedParticles=0
         }
         timer.step("UpdateQuantities");
     }

@@ -78,6 +78,67 @@ __global__ void computeAccretionConditionKernel(size_t first, size_t last, const
     if (threadIdx.x == 0) { atomicAddRS(device_removed, block_removed); }
 }
 
+template<unsigned numThreads, typename T1, typename Th, typename Tkeys, typename T2, typename Tm, typename Tv>
+__global__ void computeBinaryAccretionConditionKernel(
+    size_t first, size_t last,
+    const T1* x, const T1* y, const T1* z, const Th* h, Tkeys* keys,
+    const Tm* m, const Tv* vx, const Tv* vy, const Tv* vz,
+    cstone::Vec3<T2> star1_position, T2 star1_size2,
+    T2 star1_removal_limit_h, T2 star1_removal_limit_r2, T2 star1_removal_limit_z,
+    cstone::Vec3<T2> star2_position, T2 star2_size2,
+    T2 star2_removal_limit_h, T2 star2_removal_limit_r2, T2 star2_removal_limit_z,
+    RemovalStatistics* device_accreted1, RemovalStatistics* device_removed1,
+    RemovalStatistics* device_accreted2, RemovalStatistics* device_removed2)
+{
+    cstone::LocalIndex i = first + blockDim.x * blockIdx.x + threadIdx.x;
+
+    RemovalStatistics accreted1{}, removed1{}, accreted2{}, removed2{};
+
+    if (i < last)
+    {
+        const double dx1     = x[i] - star1_position[0];
+        const double dy1     = y[i] - star1_position[1];
+        const double dz1     = z[i] - star1_position[2];
+        const double dist2_1 = dx1 * dx1 + dy1 * dy1 + dz1 * dz1;
+
+        const double dx2     = x[i] - star2_position[0];
+        const double dy2     = y[i] - star2_position[1];
+        const double dz2     = z[i] - star2_position[2];
+        const double dist2_2 = dx2 * dx2 + dy2 * dy2 + dz2 * dz2;
+
+        const double r_cyl2 = (double)x[i] * x[i] + (double)y[i] * y[i];
+        const double abs_z  = fabs((double)z[i]);
+
+        if (dist2_1 < star1_size2) { markForRemovalAndAdd(accreted1, i, keys, m, vx, vy, vz); }
+        else if (h[i] > star1_removal_limit_h || r_cyl2 > star1_removal_limit_r2 || abs_z > star1_removal_limit_z)
+            { markForRemovalAndAdd(removed1, i, keys, m, vx, vy, vz); }
+
+        if (dist2_2 < star2_size2) { markForRemovalAndAdd(accreted2, i, keys, m, vx, vy, vz); }
+        else if (h[i] > star2_removal_limit_h || r_cyl2 > star2_removal_limit_r2 || abs_z > star2_removal_limit_z)
+            { markForRemovalAndAdd(removed2, i, keys, m, vx, vy, vz); }
+    }
+
+    typedef cub::BlockReduce<RemovalStatistics, numThreads> BlockReduce;
+    __shared__ typename BlockReduce::TempStorage            temp_storage;
+
+    RemovalStatistics block_accreted1 = BlockReduce(temp_storage).Sum(accreted1);
+    __syncthreads();
+    RemovalStatistics block_removed1  = BlockReduce(temp_storage).Sum(removed1);
+    __syncthreads();
+    RemovalStatistics block_accreted2 = BlockReduce(temp_storage).Sum(accreted2);
+    __syncthreads();
+    RemovalStatistics block_removed2  = BlockReduce(temp_storage).Sum(removed2);
+    __syncthreads();
+
+    if (threadIdx.x == 0)
+    {
+        atomicAddRS(device_accreted1, block_accreted1);
+        atomicAddRS(device_removed1,  block_removed1);
+        atomicAddRS(device_accreted2, block_accreted2);
+        atomicAddRS(device_removed2,  block_removed2);
+    }
+}
+
 template<typename Treal, typename Thydro, typename Tkeys, typename Tmass>
 void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z,
                                   const Thydro* h, Tkeys* keys, const Tmass* m, const Thydro* vx, const Thydro* vy,
@@ -112,6 +173,52 @@ void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, con
     checkGpuErrors(cudaFree(removed_device));
 }
 
+template<typename Treal, typename Thydro, typename Tkeys, typename Tmass>
+void computeBinaryAccretionConditionGPU(size_t first, size_t last,
+                                         const Treal* x, const Treal* y, const Treal* z, const Thydro* h,
+                                         Tkeys* keys, const Tmass* m, const Thydro* vx, const Thydro* vy,
+                                         const Thydro* vz, StarData& star1, StarData& star2)
+{
+    cstone::LocalIndex numParticles = last - first;
+    constexpr unsigned numThreads   = 256;
+    unsigned           numBlocks    = (numParticles + numThreads - 1) / numThreads;
+
+    star1.accreted_local = {};
+    star1.removed_local  = {};
+    star2.accreted_local = {};
+    star2.removed_local  = {};
+
+    RemovalStatistics *accreted1_d, *removed1_d, *accreted2_d, *removed2_d;
+    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&accreted1_d), sizeof(RemovalStatistics)));
+    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&removed1_d),  sizeof(RemovalStatistics)));
+    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&accreted2_d), sizeof(RemovalStatistics)));
+    checkGpuErrors(cudaMalloc(reinterpret_cast<void**>(&removed2_d),  sizeof(RemovalStatistics)));
+    checkGpuErrors(cudaMemcpy(accreted1_d, &star1.accreted_local, sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
+    checkGpuErrors(cudaMemcpy(removed1_d,  &star1.removed_local,  sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
+    checkGpuErrors(cudaMemcpy(accreted2_d, &star2.accreted_local, sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
+    checkGpuErrors(cudaMemcpy(removed2_d,  &star2.removed_local,  sizeof(RemovalStatistics), cudaMemcpyHostToDevice));
+
+    computeBinaryAccretionConditionKernel<numThreads><<<numBlocks, numThreads>>>(
+        first, last, x, y, z, h, keys, m, vx, vy, vz,
+        star1.position, star1.inner_size * star1.inner_size,
+        star1.removal_limit_h, star1.removal_limit_r * star1.removal_limit_r, star1.removal_limit_z,
+        star2.position, star2.inner_size * star2.inner_size,
+        star2.removal_limit_h, star2.removal_limit_r * star2.removal_limit_r, star2.removal_limit_z,
+        accreted1_d, removed1_d, accreted2_d, removed2_d);
+
+    checkGpuErrors(cudaDeviceSynchronize());
+    checkGpuErrors(cudaGetLastError());
+
+    checkGpuErrors(cudaMemcpy(&star1.accreted_local, accreted1_d, sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
+    checkGpuErrors(cudaMemcpy(&star1.removed_local,  removed1_d,  sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
+    checkGpuErrors(cudaMemcpy(&star2.accreted_local, accreted2_d, sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
+    checkGpuErrors(cudaMemcpy(&star2.removed_local,  removed2_d,  sizeof(RemovalStatistics), cudaMemcpyDeviceToHost));
+    checkGpuErrors(cudaFree(accreted1_d));
+    checkGpuErrors(cudaFree(removed1_d));
+    checkGpuErrors(cudaFree(accreted2_d));
+    checkGpuErrors(cudaFree(removed2_d));
+}
+
 #define COMPUTE_ACCRETION_CONDITION_GPU(Treal, Thydro, Tkeys, Tmass)                                                   \
     template void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, const Treal* y,              \
                                                const Treal* z, const Thydro* h, Tkeys* keys, const Tmass* m,           \
@@ -120,5 +227,16 @@ void computeAccretionConditionGPU(size_t first, size_t last, const Treal* x, con
 COMPUTE_ACCRETION_CONDITION_GPU(double, double, size_t, double);
 COMPUTE_ACCRETION_CONDITION_GPU(double, float, size_t, double);
 COMPUTE_ACCRETION_CONDITION_GPU(double, float, size_t, float);
+
+#define COMPUTE_BINARY_ACCRETION_CONDITION_GPU(Treal, Thydro, Tkeys, Tmass)                                         \
+    template void computeBinaryAccretionConditionGPU(size_t, size_t,                                                  \
+                                                      const Treal* x, const Treal* y, const Treal* z,               \
+                                                      const Thydro* h, Tkeys* keys, const Tmass* m,                  \
+                                                      const Thydro* vx, const Thydro* vy, const Thydro* vz,          \
+                                                      StarData&, StarData&);
+
+COMPUTE_BINARY_ACCRETION_CONDITION_GPU(double, double, size_t, double);
+COMPUTE_BINARY_ACCRETION_CONDITION_GPU(double, float, size_t, double);
+COMPUTE_BINARY_ACCRETION_CONDITION_GPU(double, float, size_t, float);
 
 } // namespace disk

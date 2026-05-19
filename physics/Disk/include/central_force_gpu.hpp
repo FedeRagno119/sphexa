@@ -10,4 +10,9 @@ namespace disk
 template<typename Treal, typename Thydro, typename Tmass>
 void computeCentralForceGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z, Thydro* ax,
                             Thydro* ay, Thydro* az, const Tmass* m, Treal g, StarData& star);
+
+template<typename Treal, typename Thydro, typename Tmass>
+void computeBinaryCentralForceGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z,
+                                   Thydro* ax, Thydro* ay, Thydro* az, const Tmass* m, Treal g,
+                                   StarData& star1, StarData& star2);
 }

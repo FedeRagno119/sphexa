@@ -24,13 +24,14 @@ void betaCoolingImpl(size_t first, size_t last, Dataset& d, const StarData& star
     {
         if (d.rho[i] < star.cooling_rho_limit && d.u[i] > star.u_floor)
         {
-            const double dx    = d.x[i] - star.position[0];
-            const double dy    = d.y[i] - star.position[1];
-            const double dz    = d.z[i] - star.position[2];
-            const double dist2 = dx * dx + dy * dy + dz * dz;
-            const double dist  = std::sqrt(dist2);
-            const double omega = std::sqrt(d.g * star.m / (dist2 * dist));
-            d.du[i] += -d.u[i] * omega / star.beta;
+            const double dx         = d.x[i] - star.position[0];
+            const double dy         = d.y[i] - star.position[1];
+            const double dz         = d.z[i] - star.position[2];
+            const double dist2      = dx * dx + dy * dy + dz * dz;
+            const double dist       = std::sqrt(dist2);
+            const double omega      = std::sqrt(d.g * star.m / (dist2 * dist));
+            const double beta_local = star.beta * std::pow(dist / star.r_beta0, -star.beta_b);
+            d.du[i] += -d.u[i] * omega / beta_local;
         }
     }
 }
@@ -159,13 +160,14 @@ void betaCoolingBinaryImpl(size_t first, size_t last, Dataset& d, const StarData
     {
         if (d.rho[i] < star1.cooling_rho_limit && d.u[i] > star1.u_floor)
         {
-            const double dx    = d.x[i] - com_x;
-            const double dy    = d.y[i] - com_y;
-            const double dz    = d.z[i] - com_z;
-            const double dist2 = dx * dx + dy * dy + dz * dz + eps * eps;
-            const double dist  = std::sqrt(dist2);
-            const double omega = std::sqrt(d.g * M_total / (dist2 * dist));
-            d.du[i] += -d.u[i] * omega / star1.beta;
+            const double dx         = d.x[i] - com_x;
+            const double dy         = d.y[i] - com_y;
+            const double dz         = d.z[i] - com_z;
+            const double dist2      = dx * dx + dy * dy + dz * dz + eps * eps;
+            const double dist       = std::sqrt(dist2);
+            const double omega      = std::sqrt(d.g * M_total / (dist2 * dist));
+            const double beta_local = star1.beta * std::pow(dist / star1.r_beta0, -star1.beta_b);
+            d.du[i] += -d.u[i] * omega / beta_local;
         }
     }
 }

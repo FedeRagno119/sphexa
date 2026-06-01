@@ -38,8 +38,14 @@ struct StarData
     //! @brief Fix the position of the central star instead of integrating the position
     int fixed_star{1};
 
-    //! @brief Constant for beta cooling in the disk
+    //! @brief Reference value of beta at r = r_beta0: beta(r) = beta * (r / r_beta0)^(-beta_b)
     double beta{std::numeric_limits<double>::infinity()};
+
+    //! @brief Power-law index for radially dependent beta; 0 = spatially constant (default)
+    double beta_b{0.};
+
+    //! @brief Reference radius for the beta power law; irrelevant when beta_b == 0
+    double r_beta0{1.};
 
     //! @brief Remove all particles with a smoothing length greater than this value
     double removal_limit_h{std::numeric_limits<double>::infinity()};
@@ -115,6 +121,8 @@ struct StarData
         optionalIO(prefix + "::grav_softening", &grav_softening, 1);
         optionalIO(prefix + "::fixed_star", &fixed_star, 1);
         optionalIO(prefix + "::beta", &beta, 1);
+        optionalIO(prefix + "::beta_b", &beta_b, 1);
+        optionalIO(prefix + "::r_beta0", &r_beta0, 1);
         optionalIO(prefix + "::removal_limit_h", &removal_limit_h, 1);
         optionalIO(prefix + "::removal_limit_r", &removal_limit_r, 1);
         optionalIO(prefix + "::removal_limit_z", &removal_limit_z, 1);
@@ -122,6 +130,9 @@ struct StarData
         optionalIO(prefix + "::u_floor", &u_floor, 1);
         optionalIO(prefix + "::K_u", &K_u, 1);
         optionalIO(prefix + "::betaEps", &betaEps, 1);
+        optionalIO(prefix + "::spin_x", &spin[0], 1);
+        optionalIO(prefix + "::spin_y", &spin[1], 1);
+        optionalIO(prefix + "::spin_z", &spin[2], 1);
     };
 
     //! @brief Specific potential at star location due to disk particles: ∑_i (-G m_i / r_i).
@@ -145,6 +156,9 @@ struct StarData
 
     //! @brief Statistics of removed particles
     RemovalStatistics removed_local;
+
+    //! @brief Spin angular momentum of the star, accumulated by accretion (eq 154).
+    cstone::Vec3<double> spin{0., 0., 0.};
 
     //! @brief timestep from central acceleration (local to rank)
     double t_star{};

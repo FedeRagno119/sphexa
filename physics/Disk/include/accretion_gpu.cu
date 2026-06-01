@@ -20,18 +20,36 @@ __device__ void atomicAddRS(RemovalStatistics* x, const RemovalStatistics& y)
     atomicAdd(&(x->momentum[1]), y.momentum[1]);
     atomicAdd(&(x->momentum[2]), y.momentum[2]);
     atomicAdd(&(x->count), y.count);
+    atomicAdd(&(x->weighted_position[0]),  y.weighted_position[0]);
+    atomicAdd(&(x->weighted_position[1]),  y.weighted_position[1]);
+    atomicAdd(&(x->weighted_position[2]),  y.weighted_position[2]);
+    atomicAdd(&(x->angular_momentum[0]),   y.angular_momentum[0]);
+    atomicAdd(&(x->angular_momentum[1]),   y.angular_momentum[1]);
+    atomicAdd(&(x->angular_momentum[2]),   y.angular_momentum[2]);
 }
 
-template<typename Tkeys, typename Tm, typename Tv>
-__device__ void markForRemovalAndAdd(RemovalStatistics& statistics, size_t i, Tkeys* keys, const Tm* m, const Tv* vx,
-                                     const Tv* vy, const Tv* vz)
+template<typename Tkeys, typename Tm, typename Tv, typename Tpos>
+__device__ void markForRemovalAndAdd(RemovalStatistics& statistics, size_t i,
+                                     Tkeys* keys, const Tm* m,
+                                     const Tv* vx, const Tv* vy, const Tv* vz,
+                                     const Tpos* x, const Tpos* y, const Tpos* z)
 {
-    keys[i]                = cstone::removeKey<Tkeys>::value;
-    statistics.mass        = m[i];
-    statistics.momentum[0] = m[i] * vx[i];
-    statistics.momentum[1] = m[i] * vy[i];
-    statistics.momentum[2] = m[i] * vz[i];
-    statistics.count       = 1;
+    keys[i] = cstone::removeKey<Tkeys>::value;
+    const double mi  = m[i];
+    const double xi  = x[i],  yi  = y[i],  zi  = z[i];
+    const double vxi = vx[i], vyi = vy[i], vzi = vz[i];
+
+    statistics.mass              = mi;
+    statistics.momentum[0]       = mi * vxi;
+    statistics.momentum[1]       = mi * vyi;
+    statistics.momentum[2]       = mi * vzi;
+    statistics.count             = 1;
+    statistics.weighted_position[0]  = mi * xi;
+    statistics.weighted_position[1]  = mi * yi;
+    statistics.weighted_position[2]  = mi * zi;
+    statistics.angular_momentum[0]   = mi * (yi * vzi - zi * vyi);
+    statistics.angular_momentum[1]   = mi * (zi * vxi - xi * vzi);
+    statistics.angular_momentum[2]   = mi * (xi * vyi - yi * vxi);
 }
 
 template<unsigned numThreads, typename T1, typename Th, typename Tkeys, typename T2, typename Tm, typename Tv>
@@ -60,10 +78,10 @@ __global__ void computeAccretionConditionKernel(size_t first, size_t last, const
         const double r_cyl2 = (double)x[i] * x[i] + (double)y[i] * y[i];
         const double abs_z  = fabs((double)z[i]);
 
-        if (dist2 < star_size2) { markForRemovalAndAdd(accreted, i, keys, m, vx, vy, vz); }
+        if (dist2 < star_size2) { markForRemovalAndAdd(accreted, i, keys, m, vx, vy, vz, x, y, z); }
         else if (h[i] > removal_limit_h
                  || r_cyl2 > removal_limit_r2
-                 || abs_z  > removal_limit_z) { markForRemovalAndAdd(removed, i, keys, m, vx, vy, vz); }
+                 || abs_z  > removal_limit_z) { markForRemovalAndAdd(removed, i, keys, m, vx, vy, vz, x, y, z); }
     }
 
     typedef cub::BlockReduce<RemovalStatistics, numThreads> BlockReduce;
@@ -109,13 +127,13 @@ __global__ void computeBinaryAccretionConditionKernel(
         const double r_cyl2 = (double)x[i] * x[i] + (double)y[i] * y[i];
         const double abs_z  = fabs((double)z[i]);
 
-        if (dist2_1 < star1_size2) { markForRemovalAndAdd(accreted1, i, keys, m, vx, vy, vz); }
+        if (dist2_1 < star1_size2) { markForRemovalAndAdd(accreted1, i, keys, m, vx, vy, vz, x, y, z); }
         else if (h[i] > star1_removal_limit_h || r_cyl2 > star1_removal_limit_r2 || abs_z > star1_removal_limit_z)
-            { markForRemovalAndAdd(removed1, i, keys, m, vx, vy, vz); }
+            { markForRemovalAndAdd(removed1, i, keys, m, vx, vy, vz, x, y, z); }
 
-        if (dist2_2 < star2_size2) { markForRemovalAndAdd(accreted2, i, keys, m, vx, vy, vz); }
+        if (dist2_2 < star2_size2) { markForRemovalAndAdd(accreted2, i, keys, m, vx, vy, vz, x, y, z); }
         else if (h[i] > star2_removal_limit_h || r_cyl2 > star2_removal_limit_r2 || abs_z > star2_removal_limit_z)
-            { markForRemovalAndAdd(removed2, i, keys, m, vx, vy, vz); }
+            { markForRemovalAndAdd(removed2, i, keys, m, vx, vy, vz, x, y, z); }
     }
 
     typedef cub::BlockReduce<RemovalStatistics, numThreads> BlockReduce;

@@ -9,16 +9,20 @@ namespace disk
 {
 struct RemovalStatistics
 {
-    double               mass;
-    cstone::Vec3<double> momentum;
-    unsigned             count;
+    double               mass{0.};
+    cstone::Vec3<double> momentum{0., 0., 0.};
+    unsigned             count{0};
+    cstone::Vec3<double> weighted_position{0., 0., 0.};  // Σ m_a * r_a  (eq 151)
+    cstone::Vec3<double> angular_momentum{0., 0., 0.};   // Σ m_a * (r_a × v_a)  (eq 154)
 
     HOST_DEVICE_FUN friend RemovalStatistics operator+(const RemovalStatistics& a, const RemovalStatistics& b)
     {
         RemovalStatistics result;
-        result.mass     = a.mass + b.mass;
-        result.momentum = a.momentum + b.momentum;
-        result.count    = a.count + b.count;
+        result.mass              = a.mass + b.mass;
+        result.momentum          = a.momentum + b.momentum;
+        result.count             = a.count + b.count;
+        result.weighted_position = a.weighted_position + b.weighted_position;
+        result.angular_momentum  = a.angular_momentum + b.angular_momentum;
         return result;
     }
 };

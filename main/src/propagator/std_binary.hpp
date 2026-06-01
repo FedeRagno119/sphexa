@@ -127,7 +127,11 @@ public:
     }
 
     /* Second key function of binarypropagator. Includes:
-
+        1) Timestep computation
+        2) Energy floor implementation
+        3) Smoothing length calculation (enforcing target number of neighbors)
+        4) Force calculation + Position and velocity integration
+        5) Accretion + removal of particles
     */
     void integrate(DomainType& domain, DataType& simData) override
     {
@@ -164,10 +168,7 @@ public:
         );
         timer.step("Timestep");
 
-        /*FR:
-        Integrates particle positions and velocities using ax, ay, az over timestep d.minDt
-        Integrates thermal state using du over timestep d.minDt
-        */
+        //FR: Apply energy floor to avoid minDt going to 0
         computePositions(Base::groups_.view(), d, domain.box(), d.minDt, {float(d.minDt_m1)});
         {
             uint64_t local_count  = disk::applyEnergyFloor(first, last, d);
@@ -208,7 +209,7 @@ public:
 
         //disk::computeBinaryAccretionCondition(star1, star2); //TODO: check if stars have merged (?)
 
-        /*FR: TODO -> add spin to star?
+        /*FR:
             1) Collects accreted mass and momentum from all MPI ranks
             2) Adds mass and momentum to star
         */

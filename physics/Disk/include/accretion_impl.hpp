@@ -34,14 +34,6 @@ void computeAccretionConditionImpl(size_t first, size_t last, Dataset& d, StarDa
         const double dy    = d.y[i] - star.position[1];
         const double dz    = d.z[i] - star.position[2];
         const double dist2 = dx * dx + dy * dy + dz * dz;
-        //const double dist = std::sqrt(dist2);
-
-        /* FR: ADDING VELOCITY REMOVAL LOGIC
-        const double vx    = d.vx[i];
-        const double vy    = d.vy[i];
-        const double vz    = d.vz[i];
-        const double v2 = vx * vx + vy * vy + vz * vz;
-        */
 
         const double r_cyl2 = d.x[i] * d.x[i] + d.y[i] * d.y[i];
         const double abs_z  = std::abs(d.z[i]);
@@ -67,8 +59,24 @@ void computeBinaryAccretionConditionImpl(size_t first, size_t last, Dataset& d, 
 
     auto markForRemovalAndAdd = [&d](RemovalStatistics& statistics, size_t i)
     {
-        d.keys[i]  = cstone::removeKey<typename Dataset::KeyType>::value;
-        statistics = statistics + RemovalStatistics{d.m[i], {d.m[i] * d.vx[i], d.m[i] * d.vy[i], d.m[i] * d.vz[i]}, 1};
+        d.keys[i] = cstone::removeKey<typename Dataset::KeyType>::value;
+
+        const double mi  = d.m[i];
+        const double xi  = d.x[i],  yi  = d.y[i],  zi  = d.z[i];
+        const double vxi = d.vx[i], vyi = d.vy[i], vzi = d.vz[i];
+
+        // Positional aggregate init order: mass, momentum, count (unsigned),
+        // weighted_position, angular_momentum.
+        // '1u' is an unsigned literal matching the 'unsigned count' field.
+        statistics = statistics + RemovalStatistics{
+            mi,
+            {mi * vxi, mi * vyi, mi * vzi},           // momentum = m*v
+            1u,                                        // count
+            {mi * xi,  mi * yi,  mi * zi},             // weighted_position = m*r
+            {mi * (yi*vzi - zi*vyi),                   // angular_momentum = m*(r×v)
+             mi * (zi*vxi - xi*vzi),
+             mi * (xi*vyi - yi*vxi)}
+        };
     };
 
 #pragma omp declare reduction(add_statistics : RemovalStatistics : omp_out = omp_out + omp_in) initializer(omp_priv = {})

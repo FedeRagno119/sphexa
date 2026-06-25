@@ -108,15 +108,13 @@ void computeTimestep(size_t first, size_t last, Dataset& d, Ts... extraTimesteps
     {
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        if (rank == 0)
-        {
-            std::printf("Timestep candidates: CFL=%.6e ; acceleration_based=%.6e ; density_based=%.6e ; growth_limit=%.6e",
-                        double(d.minDtCourant), double(minDtAcc), double(d.minDtRho),
-                        double(d.maxDtIncrease * d.minDt));
-            int idx = 0;
-            ((std::printf(" ; extra_%d=%.6e", idx++, double(extraTimesteps))), ...);
-            std::printf("\n");
-        }
+        std::printf("[rank %d] Timestep candidates: CFL=%.6e ; acceleration_based=%.6e ; density_based=%.6e ; growth_limit=%.6e",
+                    rank, double(d.minDtCourant), double(minDtAcc), double(d.minDtRho),
+                    double(d.maxDtIncrease * d.minDt));
+        int idx = 0;
+        ((std::printf(" ; extra_%d=%.6e", idx++, double(extraTimesteps))), ...);
+        std::printf("\n");
+        std::fflush(stdout);
     }
 
     T minDtLoc = std::min({minDtAcc, d.minDtCourant, d.minDtRho, d.maxDtIncrease * d.minDt, extraTimesteps...});

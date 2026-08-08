@@ -94,7 +94,13 @@ int main(int argc, char** argv)
     const std::string        writeFreqStr = parser.get("-w", std::string("0"));
     const bool               writeEnabled = writeFreqStr != "0" || !writeExtra.empty();
     const std::string        profFreqStr  = parser.get("--profile", maxStepStr);
-    const bool               profEnabled  = parser.exists("--profile") || writeEnabled;
+    //FR Profiling is opt-in via --profile only. It used to also switch on whenever -w was
+    // given, which meant every run silently appended metrics to ./profile.h5 in the submit
+    // directory. That single file is shared by every run, grows a step per metric per dump,
+    // and once a process exited uncleanly it stayed corrupt — after which every later metrics
+    // write failed (H5GetNumSteps/H5SetStep errors) and the failed H5CloseFile leaked HDF5
+    // objects, producing "HDF5: infinite loop closing library" at exit.
+    const bool               profEnabled  = parser.exists("--profile");
     const std::string        pmroot       = parser.get("--pmroot", std::string("")); // /sys/cray/pm_counters
     std::string              outFile      = parser.get("-o", "dump_" + removeModifiers(initCond));
     std::string              profFile     = parser.get("-op", std::string("profile"));
@@ -189,11 +195,14 @@ int main(int argc, char** argv)
         propagator->integrate(domain, simData);         //FR: particle integration
         propagator->printIterationTimings(domain, simData);
 
-        if (isOutputStep(d.iteration, profFreqStr) || isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) ||
-            isWallClockReached)
+        // profEnabled is uniform across ranks (same CLI), so this branch is collective-safe:
+        // with profiling off no writer is constructed at all, avoiding both the profile file
+        // and the MPI_Comm_split in the sequential writer's constructor.
+        if (profEnabled && (isOutputStep(d.iteration, profFreqStr) ||
+                            isOutputTime(d.ttot - d.minDt, d.ttot, profFreqStr) || isWallClockReached))
         {
             auto fileWriterSeq = fileWriterFactory(ascii, MPI_COMM_WORLD, true);
-            if (profEnabled) { propagator->writeMetrics(fileWriterSeq.get(), profFile); }
+            propagator->writeMetrics(fileWriterSeq.get(), profFile);
         }
     }
     totalTimer.step("Total execution time of " + std::to_string(d.iteration - startIteration) + " iterations of " +
@@ -208,7 +217,7 @@ int main(int argc, char** argv)
 bool stopConditionReached(size_t iteration, double time, const std::string& maxStepStr)
 {
     bool lastIteration = strIsIntegral(maxStepStr) && iteration >= std::stoi(maxStepStr);
-    bool simTimeLimit  = !strIsIntegral(maxStepStr) && time > std::stod(maxStepStr);
+    bool simTimeLimit  = !strIsIntegral(maxStepStr) && strIsNumeric(maxStepStr) && time > std::stod(maxStepStr);
 
     return lastIteration || simTimeLimit;
 }

@@ -106,15 +106,21 @@ void computeTimestep(size_t first, size_t last, Dataset& d, Ts... extraTimesteps
     T minDtAcc = (d.g != 0.0) ? accelerationTimestep(first, last, d) : INFINITY;
 
     {
+        // Only rank 0 prints: the other ranks' local candidates interleave nondemocratically
+        // in stdout and add noise without information (the binding value is the global minimum
+        // reduced below). Note these are rank 0's LOCAL candidates, not the global reduction.
         int rank;
         MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-        std::printf("[rank %d] Timestep candidates: CFL=%.6e ; acceleration_based=%.6e ; density_based=%.6e ; growth_limit=%.6e",
-                    rank, double(d.minDtCourant), double(minDtAcc), double(d.minDtRho),
-                    double(d.maxDtIncrease * d.minDt));
-        int idx = 0;
-        ((std::printf(" ; extra_%d=%.6e", idx++, double(extraTimesteps))), ...);
-        std::printf("\n");
-        std::fflush(stdout);
+        if (rank == 0)
+        {
+            std::printf("[rank 0] Timestep candidates: CFL=%.6e ; acceleration_based=%.6e ; density_based=%.6e ; growth_limit=%.6e",
+                        double(d.minDtCourant), double(minDtAcc), double(d.minDtRho),
+                        double(d.maxDtIncrease * d.minDt));
+            int idx = 0;
+            ((std::printf(" ; extra_%d=%.6e", idx++, double(extraTimesteps))), ...);
+            std::printf("\n");
+            std::fflush(stdout);
+        }
     }
 
     T minDtLoc = std::min({minDtAcc, d.minDtCourant, d.minDtRho, d.maxDtIncrease * d.minDt, extraTimesteps...});

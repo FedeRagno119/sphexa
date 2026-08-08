@@ -350,6 +350,12 @@ public:
         else { throw std::runtime_error("Cannot read file attributes: file not opened\n"); }
     }
 
+    std::vector<std::string> stepDatasets() override
+    {
+        if (h5File_) { return fileutils::datasetNames(h5File_); }
+        else { throw std::runtime_error("Cannot read step datasets: file not opened\n"); }
+    }
+
     int64_t fileAttributeSize(const std::string& key) override
     {
         int64_t   attrIndex = fileAttributeIndex(key);

@@ -164,6 +164,20 @@ public:
 
         if (d.g != 0.0)
         {
+            /*! The Barnes-Hut traversal *accumulates* into ugrav (ugrav[i] += ...) rather than assigning,
+             *  mirroring ax/ay/az. But unlike those, nothing initializes ugrav beforehand: ax/ay/az are
+             *  assigned by computeMomentumEnergySTD just above, whereas ugrav has no such writer. Left
+             *  uninitialized it accumulates onto whatever the domain sync left in the buffer (dependent
+             *  fields double as sync scratch), producing a garbage potential. Zero it here so the
+             *  traversal starts clean. No-op for propagators that don't allocate ugrav.
+             */
+            if (d.isAllocated("ugrav"))
+            {
+                cstone::fill<IsDeviceVector<std::decay_t<decltype(d.ugrav)>>{}>(
+                    rawPtr(d.ugrav), rawPtr(d.ugrav) + d.ugrav.size(),
+                    typename std::decay_t<decltype(d.ugrav)>::value_type(0));
+            }
+
             auto groups = mHolder_.computeSpatialGroups(d, domain);
             mHolder_.upsweep(d, domain);
             timer.step("Upsweep");

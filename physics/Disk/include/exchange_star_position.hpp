@@ -83,10 +83,17 @@ void computeAndExchangeBinaryPositions(StarData& star1, StarData& star2, Dataset
 
     auto integrateStar = [&](StarData& star, const cstone::Vec4<double>& total_force)
     {
-        if (star.fixed_star == 1) { return; }
+        // Captured even for a fixed star: the disk+companion force the star *would* feel is still
+        // the physically meaningful quantity for torque diagnostics, even though its position isn't
+        // integrated below.
         double ax = total_force[1] / star.m;
         double ay = total_force[2] / star.m;
         double az = total_force[3] / star.m;
+        star.acc[0] = ax;
+        star.acc[1] = ay;
+        star.acc[2] = az;
+
+        if (star.fixed_star == 1) { return; }
 
         double dx = integrate(ax, star.position_m1[0]);
         double dy = integrate(ay, star.position_m1[1]);

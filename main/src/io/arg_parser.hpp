@@ -11,6 +11,9 @@ namespace sphexa
 //! @brief returns true if all characters of @p str together represent a valid integral number
 bool strIsIntegral(const std::string& str);
 
+//! @brief returns true if all characters of @p str together represent a valid floating-point number
+bool strIsNumeric(const std::string& str);
+
 class ArgParser
 {
 public:

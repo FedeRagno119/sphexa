@@ -63,7 +63,8 @@ BETA_COOLING_GPU(double, float);
 
 template<typename Treal, typename Thydro, typename Ts>
 __global__ void betaCoolingBinaryGPUKernel(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z,
-                                            const Treal* u, const Thydro* rho, Treal* du, Treal g,
+                                            const Treal* u, const Thydro* rho, Treal* du, Treal* du_cool_accum,
+                                            double minDt, Treal g,
                                             Ts M_total, cstone::Vec3<Ts> com_pos, Ts beta, Ts u_floor,
                                             Ts cooling_rho_limit, Ts betaEps, Ts beta_b, Ts r_beta0)
 {
@@ -78,24 +79,32 @@ __global__ void betaCoolingBinaryGPUKernel(size_t first, size_t last, const Trea
     const double dist       = sqrt(dist2);
     const double omega      = sqrt(g * M_total / (dist2 * dist));
     const double beta_local = beta * pow(dist / r_beta0, -beta_b);
-    du[i] += -u[i] * omega / beta_local;
+    const double du_cool    = -u[i] * omega / beta_local;
+    // Nullable outputs: du is written in computeForces (for the timestep limiter); du_cool_accum is
+    // written by a second call from integrate() after computeTimestep, where minDt is the current dt.
+    if (du) { du[i] += du_cool; }
+    if (du_cool_accum) { du_cool_accum[i] += du_cool * minDt; }
 }
 
 template<typename Treal, typename Thydro>
 void betaCoolingBinaryGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z, const Treal* u,
-                           const Thydro* rho, Treal* du, const Treal g, const StarData& star1, const StarData& star2)
+                           const Thydro* rho, Treal* du, Treal* du_cool_accum, double minDt, const Treal g,
+                           const StarData& star1, const StarData& star2, bool applyDu, bool accumulateLoss)
 {
-    const double         M_total = star1.m + star2.m;
-    cstone::Vec3<double> com_pos{
-        (star1.m * star1.position[0] + star2.m * star2.position[0]) / M_total,
-        (star1.m * star1.position[1] + star2.m * star2.position[1]) / M_total,
-        (star1.m * star1.position[2] + star2.m * star2.position[2]) / M_total};
+    // Cooling center blends between the primary and the binary COM as the secondary approaches
+    // (see betaCoolingCenter); M_eff blends correspondingly between m1 and the total mass.
+    cstone::Vec3<double> center;
+    double               M_eff;
+    betaCoolingCenter(star1, star2, center, M_eff);
 
     cstone::LocalIndex numParticles = last - first;
     unsigned           numThreads   = 256;
     unsigned           numBlocks    = (numParticles + numThreads - 1) / numThreads;
 
-    betaCoolingBinaryGPUKernel<<<numBlocks, numThreads>>>(first, last, x, y, z, u, rho, du, g, M_total, com_pos,
+    betaCoolingBinaryGPUKernel<<<numBlocks, numThreads>>>(first, last, x, y, z, u, rho,
+                                                           applyDu ? du : nullptr,
+                                                           accumulateLoss ? du_cool_accum : nullptr, minDt, g,
+                                                           M_eff, center,
                                                            star1.beta, star1.u_floor, star1.cooling_rho_limit,
                                                            star1.betaEps, star1.beta_b, star1.r_beta0);
     checkGpuErrors(cudaDeviceSynchronize());
@@ -103,8 +112,10 @@ void betaCoolingBinaryGPU(size_t first, size_t last, const Treal* x, const Treal
 
 #define BETA_COOLING_BINARY_GPU(Treal, Thydro)                                                                         \
     template void betaCoolingBinaryGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z,     \
-                                        const Treal* u, const Thydro* rho, Treal* du, const Treal g,                  \
-                                        const StarData& star1, const StarData& star2);
+                                        const Treal* u, const Thydro* rho, Treal* du, Treal* du_cool_accum,           \
+                                        double minDt, const Treal g,                                                  \
+                                        const StarData& star1, const StarData& star2, bool applyDu,                   \
+                                        bool accumulateLoss);
 
 BETA_COOLING_BINARY_GPU(double, double);
 BETA_COOLING_BINARY_GPU(double, float);

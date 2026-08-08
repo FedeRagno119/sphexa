@@ -15,7 +15,8 @@ void betaCoolingGPU(size_t first, size_t last, const Treal* x, const Treal* y, c
 
 template<typename Treal, typename Thydro>
 void betaCoolingBinaryGPU(size_t first, size_t last, const Treal* x, const Treal* y, const Treal* z, const Treal* u,
-                           const Thydro* rho, Treal* du, const Treal g, const StarData& star1, const StarData& star2);
+                           const Thydro* rho, Treal* du, Treal* du_cool_accum, double minDt, const Treal g,
+                           const StarData& star1, const StarData& star2, bool applyDu, bool accumulateLoss);
 
 template<typename Treal>
 double duTimestepGPU(size_t first, size_t last, const Treal* u, const Treal* du, double u_inf);

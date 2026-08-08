@@ -92,6 +92,9 @@ public:
     virtual void                     setStep(std::string path, int step, FileMode mode)                 = 0;
     virtual std::vector<std::string> fileAttributes()                                                   = 0;
     virtual std::vector<std::string> stepAttributes()                                                   = 0;
+    //! @brief names of the particle datasets present in the current step (empty default: caller then
+    //!        falls back to attempting the read, as before)
+    virtual std::vector<std::string> stepDatasets() { return {}; }
     virtual int64_t                  fileAttributeSize(const std::string& key)                          = 0;
     virtual int64_t                  stepAttributeSize(const std::string& key)                          = 0;
     virtual void                     fileAttribute(const std::string& key, FieldType val, int64_t size) = 0;

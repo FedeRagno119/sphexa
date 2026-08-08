@@ -177,36 +177,103 @@ public:
             }
         };
 
+        /*! @brief Load or store a simulation constant: a hyperparameter that cannot change during a run.
+         *
+         *  These live in the file root, written once, rather than being copied into all N step groups.
+         *  On read the root is preferred but the step group is still consulted as a fallback, so files
+         *  written before this split -- and initial conditions that still carry them per-step -- keep
+         *  loading unchanged.
+         */
+        auto constantIO = [ar](const std::string& attribute, auto* location, size_t attrSize)
+        {
+            using LocType = std::decay_t<decltype(*location)>;
+
+            auto io = [ar, &attribute, attrSize](auto* loc)
+            {
+                // In-memory archives (Builtin*) have no root/step distinction at all; everything stays
+                // where it already was for them.
+                if constexpr (requires { ar->fileAttribute(attribute, loc, attrSize); })
+                {
+                    if constexpr (requires { ar->fileAttributes(); })   // reader: root, else fall back to step
+                    {
+                        // Prefer the root copy, but fall back to the step group on *any* failure, not just
+                        // absence: pre-split files kept the correctly-typed value per step and left a
+                        // loosely-typed (float64) copy at the root, so a root read there fails with a type
+                        // mismatch (runtime_error), not out_of_range. Falling back on both keeps those
+                        // files loadable.
+                        try { ar->fileAttribute(attribute, loc, attrSize); }
+                        catch (std::exception&) { ar->stepAttribute(attribute, loc, attrSize); }
+                    }
+                    else { ar->fileAttribute(attribute, loc, attrSize); }
+                }
+                else { ar->stepAttribute(attribute, loc, attrSize); }
+            };
+
+            try
+            {
+                if constexpr (std::is_enum_v<LocType>)
+                {
+                    // handle pointers to enum by casting to the underlying type
+                    using UType = std::underlying_type_t<LocType>;
+                    auto tmp    = static_cast<UType>(*location);
+                    io(&tmp);
+                    *location = static_cast<LocType>(tmp);
+                }
+                else { io(location); }
+            }
+            catch (std::out_of_range&)
+            {
+                if (ar->rank() == 0)
+                {
+                    std::cout << "Attribute " << attribute << " not set in file, setting to default value "
+                              << *location << std::endl;
+                }
+            }
+        };
+
+        // ---- time-dependent state: one value per step ----
         ar->stepAttribute("iteration", &iteration, 1);
         ar->stepAttribute("numParticlesGlobal", &numParticlesGlobal, 1);
-        optionalIO("ng0", &ng0, 1);
-        optionalIO("ngmax", &ngmax, 1);
-        optionalIO("removeUnconvergedParticles", &removeUnconvergedParticles, 1);
         ar->stepAttribute("time", &ttot, 1);
         ar->stepAttribute("minDt", &minDt, 1);
         ar->stepAttribute("minDt_m1", &minDt_m1, 1);
-        optionalIO("Kcour", &Kcour, 1);
-        optionalIO("Krho", &Krho, 1);
-        ar->stepAttribute("gravConstant", &g, 1);
-        optionalIO("eps", &eps, 1);
-        optionalIO("etaAcc", &etaAcc, 1);
-        optionalIO("u_inf", &u_inf, 1);
-        optionalIO("duLimitPercentile", &duLimitPercentile, 1);
+
+        // ---- hyperparameters: written once at the file root ----
+        constantIO("ng0", &ng0, 1);
+        constantIO("ngmax", &ngmax, 1);
+        constantIO("removeUnconvergedParticles", &removeUnconvergedParticles, 1);
+        // Global gas energy budget (KE/internal/self-gravity PE/total): genuinely time-dependent, so it
+        // stays per-step. Already computed globally on rank 0 every synced iteration by
+        // computeConservedQuantities (via MPI_Reduce) -- stepAttribute broadcasts rank 0's value before
+        // writing, so no new reduction is needed here.
+        optionalIO("ecin", &ecin, 1);
+        optionalIO("eint", &eint, 1);
+        optionalIO("egrav", &egrav, 1);
+        optionalIO("etot", &etot, 1);
+
+        // Numerics
+        constantIO("Kcour", &Kcour, 1);
+        constantIO("Krho", &Krho, 1);
+        constantIO("gravConstant", &g, 1);
+        constantIO("eps", &eps, 1);
+        constantIO("etaAcc", &etaAcc, 1);
+        constantIO("u_inf", &u_inf, 1);
+        constantIO("duLimitPercentile", &duLimitPercentile, 1);
 
         // EOS parameters
-        optionalIO("gamma", &gamma, 1);
-        optionalIO("eosChoice", &eosChoice, 1);
-        optionalIO("muiConst", &muiConst, 1);
-        optionalIO("soundSpeedConst", &soundSpeedConst, 1);
-        optionalIO("polytropic_index", &polytropic_index, 1);
-        optionalIO("polytropic_const", &polytropic_const, 1);
+        constantIO("gamma", &gamma, 1);
+        constantIO("eosChoice", &eosChoice, 1);
+        constantIO("muiConst", &muiConst, 1);
+        constantIO("soundSpeedConst", &soundSpeedConst, 1);
+        constantIO("polytropic_index", &polytropic_index, 1);
+        constantIO("polytropic_const", &polytropic_const, 1);
 
-        optionalIO("alphamin", &alphamin, 1);
-        optionalIO("alphamax", &alphamax, 1);
-        optionalIO("decay_constant", &decay_constant, 1);
+        constantIO("alphamin", &alphamin, 1);
+        constantIO("alphamax", &alphamax, 1);
+        constantIO("decay_constant", &decay_constant, 1);
 
-        optionalIO("sincIndex", &sincIndex, 1);
-        optionalIO("kernelChoice", &kernelChoice, 1);
+        constantIO("sincIndex", &sincIndex, 1);
+        constantIO("kernelChoice", &kernelChoice, 1);
 
         createTables();
     }
@@ -241,6 +308,7 @@ public:
     FieldVector<HydroType> ax, ay, az;                         // acceleration
     FieldVector<RealType>  du;                                 // energy rate of change (du/dt)
     FieldVector<XM1Type>   du_m1;                              // previous energy rate of change (du/dt)
+    FieldVector<double>    du_cool_accum;                      // accumulated beta-cooling energy loss since last dump (double precision to avoid drift)
     FieldVector<HydroType> c11, c12, c13, c22, c23, c33;       // IAD components
     FieldVector<HydroType> alpha;                              // AV coeficient
     FieldVector<HydroType> xm;                                 // Volume element definition
@@ -268,7 +336,7 @@ public:
      */
     inline static constexpr std::array fieldNames{
         "x",        "y",   "z",    "x_m1", "y_m1",  "z_m1", "vx",   "vy",   "vz",   "rho",   "u",     "p",     "prho",
-        "tdpdTrho", "h",   "m",    "c",    "ugrav", "ax",   "ay",   "az",   "du",   "du_m1", "c11",   "c12",   "c13",
+        "tdpdTrho", "h",   "m",    "c",    "ugrav", "ax",   "ay",   "az",   "du",   "du_m1", "du_cool_accum", "c11",   "c12",   "c13",
         "c22",      "c23", "c33",  "mue",  "mui",   "temp", "cv",   "xm",   "kx",   "divv",  "curlv", "alpha", "gradh",
         "keys",     "nc",  "dV11", "dV12", "dV13",  "dV22", "dV23", "dV33", "rung", "id"};
 
@@ -282,7 +350,7 @@ public:
     auto dataTuple()
     {
         auto ret = std::tie(x, y, z, x_m1, y_m1, z_m1, vx, vy, vz, rho, u, p, prho, tdpdTrho, h, m, c, ugrav, ax, ay,
-                            az, du, du_m1, c11, c12, c13, c22, c23, c33, mue, mui, temp, cv, xm, kx, divv, curlv, alpha,
+                            az, du, du_m1, du_cool_accum, c11, c12, c13, c22, c23, c33, mue, mui, temp, cv, xm, kx, divv, curlv, alpha,
                             gradh, keys, nc, dV11, dV12, dV13, dV22, dV23, dV33, rung, id);
 
 #if defined(__clang__) || __GNUC__ > 11

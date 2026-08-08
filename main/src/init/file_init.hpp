@@ -31,6 +31,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <vector>
+
 #include "cstone/primitives/primitives_acc.hpp"
 #include "cstone/sfc/box.hpp"
 
@@ -39,21 +42,74 @@
 namespace sphexa
 {
 
+/*! @brief May this conserved field be absent from a checkpoint and reconstructed instead of read?
+ *
+ *  Two groups qualify:
+ *   - Accumulator diagnostics ("du_cool_accum"): they measure a window between two dumps, so a restart
+ *     legitimately starts them from zero.
+ *   - Integrator state the lean dump omits ("m", "x_m1/y_m1/z_m1", "du_m1"): these are not written on
+ *     every dump because they are exactly recoverable -- m from the "particleMass" root scalar, x_m1
+ *     from the stored velocity, du_m1 as a half-step that self-corrects after one step. When absent they
+ *     are rebuilt by reconstructRestartState(), not left at zero.
+ *
+ *  Every other conserved field describes physical state that cannot be recovered, so its absence is a
+ *  hard error rather than a silent zero (a missing "vx" left at zero would look like a valid run).
+ */
+inline bool isOptionalOnRestore(const std::string& key)
+{
+    return key == "du_cool_accum" || key == "m" || key == "x_m1" || key == "y_m1" || key == "z_m1" ||
+           key == "du_m1";
+}
+
+/*! @brief Restore all conserved fields of @p d from the current step; return the ones that were absent.
+ *
+ *  A field listed by isOptionalOnRestore that is missing from the file is left zero-initialized here and
+ *  its name returned, so the caller can reconstruct it. A missing non-optional field throws.
+ */
 template<class Dataset>
-void restoreDataset(IFileReader* reader, Dataset& d)
+std::vector<std::string> restoreDataset(IFileReader* reader, Dataset& d)
 {
     d.loadOrStoreAttributes(reader);
     d.resize(reader->localNumParticles());
+
+    std::vector<std::string> missingFields;
+
+    // Datasets actually present in this step. Checking membership up front lets an absent optional field
+    // be skipped without ever calling readField on it -- otherwise H5hut prints a "Cannot open dataset"
+    // error to stderr from deep inside the failed read, even though the absence is expected and handled.
+    // Empty (readers that don't implement stepDatasets) -> fall back to the read-and-catch path below.
+    std::vector<std::string> present = reader->stepDatasets();
+    auto isPresent = [&present](const std::string& key)
+    { return present.empty() || std::find(present.begin(), present.end(), key) != present.end(); };
 
     auto fieldPointers = d.data();
     for (size_t i = 0; i < fieldPointers.size(); ++i)
     {
         if (d.isConserved(i))
         {
-            if (reader->rank() == 0) { std::cout << "restoring " << d.fieldNames[i]; }
+            const std::string key = d.fieldNames[i];
+
+            if (!isPresent(Dataset::prefix + key))
+            {
+                if (!isOptionalOnRestore(key))
+                {
+                    throw std::runtime_error("Cannot restart: required field '" + key +
+                                             "' is missing from this step and cannot be reconstructed.\n");
+                }
+                // Zero the allocated buffer so a field that is reconstructed later from zero (du_m1, the
+                // du_cool_accum accumulator) has a defined starting value rather than leftover memory.
+                std::visit([](auto field)
+                           { *field = std::decay_t<decltype(*field)>(field->size()); },
+                           fieldPointers[i]);
+                missingFields.push_back(key);
+                if (reader->rank() == 0) { std::cout << "restoring " << key << " (absent; will reconstruct)\n"; }
+                continue;
+            }
+
+            if (reader->rank() == 0) { std::cout << "restoring " << key; }
             auto t0 = std::chrono::high_resolution_clock::now();
             std::visit(
-                [reader, key = d.fieldNames[i]](auto field)
+                [reader, key](auto field)
                 {
                     using T = std::remove_reference<decltype(*field->data())>::type;
                     std::vector<T> tmp(field->size());
@@ -73,6 +129,85 @@ void restoreDataset(IFileReader* reader, Dataset& d)
             }
         }
     }
+    return missingFields;
+}
+
+/*! @brief Rebuild the integrator state a lean dump omits, from the fields it does carry.
+ *
+ *  Called after restoreDataset for the hydro dataset. @p missing is the set of conserved fields that were
+ *  absent from the file (from restoreDataset); only those are reconstructed, so restarting from an old
+ *  full checkpoint that still contains them is a no-op.
+ *
+ *  Reconstruction rules (see BinaryProp::conservedFields and sph::positionUpdate):
+ *   - m        <- the uniform "particleMass" root attribute. Errors out if the array is missing *and* the
+ *                 scalar is absent, rather than running with zero masses.
+ *   - x_m1     <- v * minDt. Exact relation is x_m1 = v*minDt - 0.5*a*minDt^2; the dropped acceleration
+ *                 term is ~1e-4 of x_m1, a one-time restart perturbation far below per-step truncation.
+ *   - du_m1    <- 0. The leapfrog energy step reuses it once, then overwrites it with the freshly
+ *                 computed du, so the transient lasts a single step.
+ *
+ *  Works on CPU and GPU via the toHost() / move-assign (H2D) idiom used by the analytic initializers.
+ */
+template<class HydroData>
+void reconstructRestartState(IFileReader* reader, HydroData& d, const std::vector<std::string>& missing)
+{
+    auto absent = [&missing](const std::string& k)
+    { return std::find(missing.begin(), missing.end(), k) != missing.end(); };
+
+    const size_t n = d.x.size();
+
+    if (absent("m"))
+    {
+        double particleMass = 0.;
+        try
+        {
+            reader->fileAttribute("particleMass", &particleMass, 1);
+        }
+        catch (std::out_of_range&)
+        {
+            throw std::runtime_error(
+                "Cannot restart: per-particle 'm' is absent from this step and no 'particleMass' root "
+                "attribute is present to reconstruct it from.\n");
+        }
+        using MType = std::decay_t<decltype(d.m)>::value_type;
+        std::vector<MType> m(n, MType(particleMass));
+        d.m = std::move(m);
+    }
+
+    if (absent("x_m1") || absent("y_m1") || absent("z_m1"))
+    {
+        using XM1Type = std::decay_t<decltype(d.x_m1)>::value_type;
+        auto&& vx = toHost(d.vx);
+        auto&& vy = toHost(d.vy);
+        auto&& vz = toHost(d.vz);
+        std::vector<XM1Type> x_m1(n), y_m1(n), z_m1(n);
+        const double         dt = d.minDt;
+#pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < n; ++i)
+        {
+            x_m1[i] = XM1Type(vx[i] * dt);
+            y_m1[i] = XM1Type(vy[i] * dt);
+            z_m1[i] = XM1Type(vz[i] * dt);
+        }
+        d.x_m1 = std::move(x_m1);
+        d.y_m1 = std::move(y_m1);
+        d.z_m1 = std::move(z_m1);
+    }
+
+    // du_m1 absent -> already zero-initialized by restoreDataset, which is the intended reconstruction.
+
+    // du_cool_accum is a per-dump *window* accumulator (cooling energy lost since the previous dump),
+    // reset in memory right after each write. But it is also written to disk, so on a restart it is
+    // reloaded carrying the last pre-restart window's value -- the first post-restart dump then
+    // double-counts it (~2x). Zero it here so every restart begins a fresh cooling window, mirroring the
+    // star-accumulator reset in BinaryProp::load(). Unconditional (not gated on `absent`): the field is
+    // present in a lean dump and reloaded with a stale value, so it must be cleared even when found.
+    // No-op for propagators that don't allocate it (size 0).
+    if (d.du_cool_accum.size() == n && n > 0)
+    {
+        using CoolType = std::decay_t<decltype(d.du_cool_accum)>::value_type;
+        d.du_cool_accum = std::vector<CoolType>(n, CoolType(0));
+    }
 }
 
 template<class SimulationData>
@@ -83,7 +218,12 @@ auto restoreData(IFileReader* reader, SimulationData& simData)
     cstone::Box<T> box(0, 1);
     box.loadOrStore(reader);
 
-    restoreDataset(reader, simData.hydro);
+    // Lean dumps omit reconstructable integrator state (m, x_m1/y_m1/z_m1, du_m1); rebuild whatever the
+    // hydro step didn't carry. Only the hydro dataset has these fields. Restoring from an old full
+    // checkpoint returns no missing fields, so this is a no-op there.
+    auto missingHydro = restoreDataset(reader, simData.hydro);
+    reconstructRestartState(reader, simData.hydro, missingHydro);
+
     restoreDataset(reader, simData.chem);
 
     return box;

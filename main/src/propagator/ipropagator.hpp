@@ -137,9 +137,18 @@ public:
     }
 
 protected:
-    static void outputAllocatedFields(IFileWriter* writer, ParticleDataType& simData)
+    /*! @brief Write the allocated output fields.
+     *
+     * @param narrowFields  field names to store at reduced width (float64->float32, uint64->uint32).
+     *                      The simulation keeps full precision internally; only the on-disk copy is
+     *                      narrowed, so the rounding error is applied once at write time and never fed
+     *                      back into the integration -- it stays bounded instead of accumulating.
+     *                      Empty by default, so propagators that don't opt in are byte-for-byte unchanged.
+     */
+    static void outputAllocatedFields(IFileWriter* writer, ParticleDataType& simData,
+                                      const std::vector<std::string>& narrowFields = {})
     {
-        auto output = [](auto& d, IFileWriter* writer)
+        auto output = [&narrowFields](auto& d, IFileWriter* writer)
         {
             auto fieldPointers = d.data();
             auto indicesDone   = d.outputFieldIndices;
@@ -152,10 +161,29 @@ protected:
                 {
                     int column = std::find(d.outputFieldIndices.begin(), d.outputFieldIndices.end(), fidx) -
                                  d.outputFieldIndices.begin();
+                    bool narrow = std::find(narrowFields.begin(), narrowFields.end(), namesDone[i]) !=
+                                  narrowFields.end();
                     std::visit(
-                        [writer, c = column, key = namesDone[i]](auto field)
+                        [writer, c = column, key = namesDone[i], narrow](auto field)
                         {
                             auto&& tmp = toHost(*field);
+                            using ElementType = std::decay_t<decltype(tmp[0])>;
+
+                            if (narrow)
+                            {
+                                if constexpr (std::is_same_v<ElementType, double>)
+                                {
+                                    std::vector<float> narrowed(tmp.begin(), tmp.end());
+                                    writeField(writer, key, narrowed.data(), c);
+                                    return;
+                                }
+                                else if constexpr (std::is_same_v<ElementType, uint64_t>)
+                                {
+                                    std::vector<uint32_t> narrowed(tmp.begin(), tmp.end());
+                                    writeField(writer, key, narrowed.data(), c);
+                                    return;
+                                }
+                            }
                             writeField(writer, key, tmp.data(), c);
                         },
                         fieldPointers[fidx]);

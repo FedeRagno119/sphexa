@@ -37,13 +37,21 @@ bool strIsIntegral(const std::string& str)
     return (*ptr) == '\0' && !str.empty();
 }
 
+bool strIsNumeric(const std::string& str)
+{
+    char* ptr;
+    std::strtod(str.c_str(), &ptr);
+    return (*ptr) == '\0' && !str.empty();
+}
+
 bool isExtraOutputStep(size_t step, double t1, double t2, const std::vector<std::string>& extraOutputs)
 {
     auto matchStepOrTime = [step, t1, t2](const std::string& token)
     {
-        double time       = std::stod(token);
-        bool   isIntegral = strIsIntegral(token);
-        return (isIntegral && std::stoul(token) == step) || (!isIntegral && t1 <= time && time < t2);
+        if (strIsIntegral(token)) { return std::stoul(token) == step; }
+        if (!strIsNumeric(token)) { return false; }
+        double time = std::stod(token);
+        return t1 <= time && time < t2;
     };
 
     return std::any_of(extraOutputs.begin(), extraOutputs.end(), matchStepOrTime);
@@ -51,8 +59,10 @@ bool isExtraOutputStep(size_t step, double t1, double t2, const std::vector<std:
 
 bool isOutputTime(double t1, double t2, const std::string& frequencyStr)
 {
+    if (strIsIntegral(frequencyStr) || !strIsNumeric(frequencyStr)) { return false; }
+
     double frequency = std::stod(frequencyStr);
-    if (strIsIntegral(frequencyStr) || frequency == 0.0) { return false; }
+    if (frequency == 0.0) { return false; }
 
     double closestMultiple = int(t2 / frequency) * frequency;
     return t2 > frequency && t1 <= closestMultiple && closestMultiple < t2;
@@ -60,8 +70,10 @@ bool isOutputTime(double t1, double t2, const std::string& frequencyStr)
 
 bool isOutputStep(size_t step, const std::string& frequencyStr)
 {
+    if (!strIsIntegral(frequencyStr)) { return false; }
+
     int frequency = std::stoi(frequencyStr);
-    return strIsIntegral(frequencyStr) && frequency != 0 && (step % frequency == 0);
+    return frequency != 0 && (step % frequency == 0);
 }
 
 std::string strBeforeSign(const std::string& str, const std::string& sign)

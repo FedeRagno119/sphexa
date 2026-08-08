@@ -147,27 +147,36 @@ size_t applyEnergyFloor(size_t first, size_t last, Dataset& d)
 
 //! @brief Cool the disk with cooling time proportional to the Keplerian orbital time around the binary center of mass
 template<typename Dataset, typename StarData>
-void betaCoolingBinaryImpl(size_t first, size_t last, Dataset& d, const StarData& star1, const StarData& star2)
+void betaCoolingBinaryImpl(size_t first, size_t last, Dataset& d, const StarData& star1, const StarData& star2,
+                           bool applyDu, bool accumulateLoss)
 {
-    const double M_total = star1.m + star2.m;
-    const double com_x   = (star1.m * star1.position[0] + star2.m * star2.position[0]) / M_total;
-    const double com_y   = (star1.m * star1.position[1] + star2.m * star2.position[1]) / M_total;
-    const double com_z   = (star1.m * star1.position[2] + star2.m * star2.position[2]) / M_total;
-    const double eps     = star1.betaEps; //FR: smoothing length - same for both stars
+    // Cooling center blends between the primary and the binary COM as the secondary approaches
+    // (see betaCoolingCenter); M_eff blends correspondingly between m1 and the total mass.
+    cstone::Vec3<double> center;
+    double               M_eff;
+    betaCoolingCenter(star1, star2, center, M_eff);
+    const double eps = star1.betaEps; //FR: smoothing length - same for both stars
 
 #pragma omp parallel for
     for (size_t i = first; i < last; i++)
     {
         if (d.rho[i] < star1.cooling_rho_limit && d.u[i] > star1.u_floor)
         {
-            const double dx         = d.x[i] - com_x;
-            const double dy         = d.y[i] - com_y;
-            const double dz         = d.z[i] - com_z;
+            const double dx         = d.x[i] - center[0];
+            const double dy         = d.y[i] - center[1];
+            const double dz         = d.z[i] - center[2];
             const double dist2      = dx * dx + dy * dy + dz * dz + eps * eps;
             const double dist       = std::sqrt(dist2);
-            const double omega      = std::sqrt(d.g * M_total / (dist2 * dist));
+            const double omega      = std::sqrt(d.g * M_eff / (dist2 * dist));
             const double beta_local = star1.beta * std::pow(dist / star1.r_beta0, -star1.beta_b);
-            d.du[i] += -d.u[i] * omega / beta_local;
+            const double du_cool    = -d.u[i] * omega / beta_local;
+            // applyDu: add the cooling rate to du (needed for the du-based timestep limiter), done in
+            //   computeForces. accumulateLoss: record the energy removed = du_cool * dt, done in a
+            //   SECOND call from integrate() AFTER computeTimestep, where d.minDt is the current step's
+            //   dt (the dt the cooling is actually integrated over). u/rho/positions are unchanged
+            //   between the two calls, so du_cool is identical; only the correct dt differs.
+            if (applyDu) { d.du[i] += du_cool; }
+            if (accumulateLoss) { d.du_cool_accum[i] += du_cool * d.minDt; }
         }
     }
 }
@@ -190,7 +199,8 @@ void betaCooling(size_t startIndex, size_t endIndex, Dataset& d, const StarData&
 
 //! @brief Cool the disk with a cooling time proportional to the Keplerian orbital time around the binary center of mass
 template<typename Dataset, typename StarData>
-void betaCoolingBinary(size_t startIndex, size_t endIndex, Dataset& d, const StarData& star1, const StarData& star2)
+void betaCoolingBinary(size_t startIndex, size_t endIndex, Dataset& d, const StarData& star1,
+                       const StarData& star2, bool applyDu, bool accumulateLoss)
 {
     using T_beta = std::decay_t<decltype(star1.beta)>;
     if (star1.beta != std::numeric_limits<T_beta>::infinity())
@@ -198,9 +208,10 @@ void betaCoolingBinary(size_t startIndex, size_t endIndex, Dataset& d, const Sta
         if constexpr (cstone::HaveGpu<typename Dataset::AcceleratorType>{})
         {
             betaCoolingBinaryGPU(startIndex, endIndex, getPtr<"x">(d), getPtr<"y">(d), getPtr<"z">(d), getPtr<"u">(d),
-                                 getPtr<"rho">(d), getPtr<"du">(d), d.g, star1, star2);
+                                 getPtr<"rho">(d), getPtr<"du">(d), getPtr<"du_cool_accum">(d),
+                                 static_cast<double>(d.minDt), d.g, star1, star2, applyDu, accumulateLoss);
         }
-        else { betaCoolingBinaryImpl(startIndex, endIndex, d, star1, star2); }
+        else { betaCoolingBinaryImpl(startIndex, endIndex, d, star1, star2, applyDu, accumulateLoss); }
     }
 }
 
